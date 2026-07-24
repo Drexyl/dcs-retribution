@@ -61,8 +61,11 @@ class PilotDelegate(TwoColumnRowDelegate):
             return f"{who} - Level: {skill.value}"
         elif (row, column) == (1, 1):
             # Dead pilots have their own list and living pilots are active by
-            # default, so only the "on leave" state is worth surfacing here.
-            return pilot.status.value if pilot.on_leave else ""
+            # default, so only the "on leave" / "recovering" states are worth
+            # surfacing here.
+            if pilot.on_leave or pilot.recovering:
+                return pilot.status.value
+            return ""
         return ""
 
 
@@ -539,6 +542,12 @@ class SquadronDialog(QDialog):
         if self.check_disabled_button_states(self.toggle_leave_button, index):
             return
         pilot = self.squadron_model.pilot_at_index(index)
+        # A CSAR-recovering pilot cannot be sent on leave (it isn't Active); leave
+        # is controlled automatically by the recovery countdown.
+        if pilot.recovering:
+            self.toggle_leave_button.setEnabled(False)
+            self.toggle_leave_button.setText("Recovering")
+            return
         self.toggle_leave_button.setEnabled(
             not pilot.on_leave or self.squadron_model.squadron.has_unfilled_pilot_slots
         )

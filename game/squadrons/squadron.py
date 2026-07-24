@@ -256,8 +256,20 @@ class Squadron:
     def end_turn(self) -> None:
         if self.destination is not None:
             self.relocate_to(self.destination)
+        self._process_pilot_recovery()
         self.replenish_lost_pilots()
         self.deliver_orders()
+
+    def _process_pilot_recovery(self) -> None:
+        """Counts down CSAR-rescued pilots and returns any whose sit-out is over.
+
+        Runs before ``replenish_lost_pilots`` so a returning pilot occupies its
+        reserved slot rather than being double-counted against replenishment.
+        Reactivated pilots are re-added to ``available_pilots`` automatically when
+        the next turn's initialization rebuilds it from ``active_pilots``.
+        """
+        for pilot in self.recovering_pilots:
+            pilot.advance_recovery()
 
     def replenish_lost_pilots(self) -> None:
         if self.pilot_limits_enabled and self.replenish_count > 0:
@@ -316,6 +328,10 @@ class Squadron:
         return self._pilots_with_status(PilotStatus.OnLeave)
 
     @property
+    def recovering_pilots(self) -> list[Pilot]:
+        return self._pilots_with_status(PilotStatus.Recovering)
+
+    @property
     def number_of_pilots_including_inactive(self) -> int:
         return len(self.current_roster)
 
@@ -329,7 +345,10 @@ class Squadron:
 
     @property
     def _number_of_unfilled_pilot_slots(self) -> int:
-        return self.pilot_limit - len(self.active_pilots)
+        # Recovering (CSAR-rescued) pilots still hold their slot -- they are
+        # returning shortly -- so they must not be treated as an empty slot for
+        # replenishment, or the squadron would over-fill when they return.
+        return self.pilot_limit - len(self.active_pilots) - len(self.recovering_pilots)
 
     @property
     def number_of_available_pilots(self) -> int:

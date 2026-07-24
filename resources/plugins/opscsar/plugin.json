@@ -1,0 +1,14 @@
+{
+    "skipUI": true,
+    "nameInUI": "Ops.CSAR",
+    "defaultValue": true,
+    "specificOptions": [],
+    "scriptsWorkOrders": [
+        {
+            "file": "OpsCSAR.lua",
+            "mnemonic": "opscsar-script"
+        }
+    ],
+    "configurationWorkOrders": [],
+    "otherResourceFiles": []
+}

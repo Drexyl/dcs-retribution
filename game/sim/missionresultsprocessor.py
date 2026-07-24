@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import logging
+import random
 from typing import TYPE_CHECKING
 
 from game.debriefing import Debriefing
 from game.ground_forces.combat_stance import CombatStance
 from game.profiling import logged_duration
-from game.theater import ControlPoint
+from game.squadrons.pilot import Pilot
+from game.theater import ControlPoint, Player
 from .gameupdateevents import GameUpdateEvents
 from ..ato.airtaaskingorder import AirTaskingOrder
 
 if TYPE_CHECKING:
     from ..game import Game
+
+#: Turns a CSAR-rescued AI pilot must sit out. 2 because the countdown's first
+#: decrement (in Squadron.end_turn) happens in the same pass_turn cycle that
+#: records the rescue, so 2 -> unavailable for exactly the next turn.
+AI_PILOT_RECOVERY_TURNS = 2
 
 
 MINOR_DEFEAT_INFLUENCE = 0.1
@@ -56,12 +63,16 @@ class MissionResultsProcessor:
                 self.record_carcasses(debriefing)
 
     def commit_air_losses(self, debriefing: Debriefing) -> None:
+        recovered = self._pilots_to_recover(debriefing)
         for loss in debriefing.air_losses.losses:
-            if loss.pilot is not None and (
-                not loss.pilot.player
-                or not self.game.settings.invulnerable_player_pilots
-            ):
-                loss.pilot.kill()
+            if loss.pilot is not None:
+                if id(loss.pilot) in recovered:
+                    self._recover_rescued_pilot(loss.pilot)
+                elif (
+                    not loss.pilot.player
+                    or not self.game.settings.invulnerable_player_pilots
+                ):
+                    loss.pilot.kill()
             squadron = loss.flight.squadron
             aircraft = loss.flight.unit_type
             available = squadron.owned_aircraft
@@ -75,6 +86,43 @@ class MissionResultsProcessor:
             logging.info(f"{aircraft} destroyed from {squadron}")
             squadron.owned_aircraft -= 1
             squadron.destroyed_aircraft += 1
+
+    def _pilots_to_recover(self, debriefing: Debriefing) -> set[int]:
+        """id()s of pilots that CSAR rescued and should not be killed.
+
+        Combines the exact pilots identified by unit name (Ops.CSAR for both AI
+        and player, AICSAR for players) with, for each side, a random sample of
+        that side's AI losses standing in for AICSAR AI rescues (which carry no
+        pilot identity).
+        """
+        recovered = set(debriefing.rescued_pilot_ids)
+        for player, count in debriefing.ai_random_rescues.items():
+            if count <= 0:
+                continue
+            losses = (
+                debriefing.air_losses.player
+                if player.is_blue
+                else debriefing.air_losses.enemy
+            )
+            candidates = [
+                loss.pilot
+                for loss in losses
+                if loss.pilot is not None
+                and not loss.pilot.player
+                and id(loss.pilot) not in recovered
+            ]
+            for pilot in random.sample(candidates, min(count, len(candidates))):
+                recovered.add(id(pilot))
+        return recovered
+
+    def _recover_rescued_pilot(self, pilot: Pilot) -> None:
+        # The airframe is still lost; only the pilot is saved. Player pilots
+        # return next turn (stay Active); AI pilots sit out one turn.
+        if pilot.player:
+            logging.info(f"CSAR: player pilot {pilot.name} recovered")
+            return
+        logging.info(f"CSAR: AI pilot {pilot.name} recovered (recovering 1 turn)")
+        pilot.begin_recovery(AI_PILOT_RECOVERY_TURNS)
 
     @staticmethod
     def _commit_pilot_experience(ato: AirTaskingOrder) -> None:

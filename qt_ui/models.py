@@ -535,6 +535,10 @@ class SquadronModel(QAbstractListModel):
 
     def toggle_leave_state(self, index: QModelIndex) -> None:
         pilot = self.pilot_at_index(index)
+        # A CSAR-recovering pilot is neither Active nor OnLeave; its availability
+        # is managed by the recovery countdown, so ignore manual leave toggles.
+        if pilot.recovering:
+            return
         self.beginResetModel()
         if pilot.on_leave:
             self.squadron.return_from_leave(pilot)

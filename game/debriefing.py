@@ -127,6 +127,16 @@ class StateData:
     #: Mangled names of bases that were captured during the mission.
     base_capture_events: List[str]
 
+    #: DCS unit names of aircraft whose ejected pilot was recovered by CSAR
+    #: (Ops.CSAR for AI/player, AICSAR for players). Each maps to a specific
+    #: pilot that should be spared rather than killed.
+    rescued_pilots: List[str]
+
+    #: Coalition tags ("blue"/"red"), one per AICSAR AI-pilot rescue. AICSAR
+    #: cannot identify the specific pilot, so each entry spares one random AI
+    #: loss of that coalition.
+    rescued_ai_random: List[str]
+
     @classmethod
     def from_json(cls, data: Dict[str, Any], unit_map: UnitMap) -> StateData:
         def clean_unit_list(unit_list: List[Any]) -> List[str]:
@@ -165,6 +175,10 @@ class StateData:
             killed_ground_units=killed_ground_units,
             destroyed_statics=data.get("destroyed_objects_positions", []),
             base_capture_events=data.get("base_capture_events", []),
+            rescued_pilots=[str(name) for name in data.get("rescued_pilots", [])],
+            rescued_ai_random=[
+                str(tag).lower() for tag in data.get("rescued_ai_random", [])
+            ],
         )
 
 
@@ -182,6 +196,35 @@ class Debriefing:
         self.air_losses = self.dead_aircraft()
         self.ground_losses = self.dead_ground_units()
         self.base_captures = self.base_capture_events()
+        self.rescued_pilot_ids = self._rescued_pilot_ids()
+        self.ai_random_rescues = self._ai_random_rescues()
+
+    def _rescued_pilot_ids(self) -> set[int]:
+        """Resolve CSAR-rescued unit names to the id() of their specific pilot.
+
+        Pilot is an unfrozen (unhashable) dataclass whose value-equality would
+        conflate distinct pilots, so we key on object identity, which is stable
+        for the lifetime of the debrief.
+        """
+        ids: set[int] = set()
+        for unit_name in self.state_data.rescued_pilots:
+            flying_unit = self.unit_map.flight(unit_name)
+            if flying_unit is None or flying_unit.pilot is None:
+                logging.warning(
+                    "CSAR rescue: could not resolve a pilot for unit %s", unit_name
+                )
+                continue
+            ids.add(id(flying_unit.pilot))
+        return ids
+
+    def _ai_random_rescues(self) -> dict[Player, int]:
+        counts: dict[Player, int] = defaultdict(int)
+        for tag in self.state_data.rescued_ai_random:
+            if tag == "blue":
+                counts[Player.BLUE] += 1
+            elif tag == "red":
+                counts[Player.RED] += 1
+        return dict(counts)
 
     def merge_simulation_results(self, results: SimulationResults) -> None:
         for air_loss in results.air_losses:

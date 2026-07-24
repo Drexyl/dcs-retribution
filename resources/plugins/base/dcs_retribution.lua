@@ -10,6 +10,8 @@ unit_lost_events = {} -- killed units will be added via S_EVENT_UNIT_LOST
 kill_events = {} -- killed units will be added via S_EVENT_KILL 
 base_capture_events = {}
 destroyed_objects_positions = {} -- will be added via S_EVENT_DEAD event
+rescued_pilots = {} -- DCS unit names of aircraft whose ejected pilot CSAR recovered (exact)
+rescued_ai_random = {} -- coalition tags ("blue"/"red"), one per AICSAR AI-pilot rescue
 mission_ended = false
 dirty_state = false -- Track if state has changed and needs writing
 
@@ -47,6 +49,8 @@ function write_state()
 		["kill_events"] = kill_events,
         ["mission_ended"] = mission_ended,
         ["destroyed_objects_positions"] = destroyed_objects_positions,
+        ["rescued_pilots"] = rescued_pilots,
+        ["rescued_ai_random"] = rescued_ai_random,
     }
     local ok, write_error = pcall(function()
         fp:write(json:encode(game_state))

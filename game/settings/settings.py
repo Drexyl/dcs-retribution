@@ -906,6 +906,54 @@ class Settings:
             "terrain data. An unused X-band channel is assigned to each."
         ),
     )
+    opscsar_blue: bool = boolean_option(
+        "Ops.CSAR player rescue helicopters (Blue)",
+        MISSION_GENERATOR_PAGE,
+        GAMEPLAY_SECTION,
+        default=False,
+        detail=(
+            "Adds a player-flyable CSAR rescue helicopter slot at each "
+            "blue-captured airfield and enables MOOSE Ops.CSAR for blue. Players "
+            "fly the rescue helicopter to recover downed pilots. The helicopter "
+            "type is the best transport-capable helicopter based at each "
+            "airfield. Requires the base plugin."
+        ),
+    )
+    opscsar_red: bool = boolean_option(
+        "Ops.CSAR player rescue helicopters (Red)",
+        MISSION_GENERATOR_PAGE,
+        GAMEPLAY_SECTION,
+        default=False,
+        detail=(
+            "Adds a player-flyable CSAR rescue helicopter slot at each "
+            "red-captured airfield and enables MOOSE Ops.CSAR for red. Players "
+            "fly the rescue helicopter to recover downed pilots. The helicopter "
+            "type is the best transport-capable helicopter based at each "
+            "airfield. Requires the base plugin."
+        ),
+    )
+    opscsar_rescue_ai_pilots: bool = boolean_option(
+        "Ops.CSAR: Enable AI Pilot Rescue",
+        MISSION_GENERATOR_PAGE,
+        GAMEPLAY_SECTION,
+        default=True,
+        detail=(
+            "When enabled, Ops.CSAR also spawns a rescuable downed pilot for AI "
+            "ejections, not just player ejections. Has no effect unless Ops.CSAR "
+            "is enabled above for at least one side."
+        ),
+    )
+    opscsar_warm_startup: bool = boolean_option(
+        "Rescue Helo Warm Startup",
+        MISSION_GENERATOR_PAGE,
+        GAMEPLAY_SECTION,
+        default=False,
+        detail=(
+            "Spawns Ops.CSAR rescue helicopters with engines already running "
+            "(warm start) instead of cold and dark. Has no effect unless "
+            "Ops.CSAR is enabled above for at least one side."
+        ),
+    )
     generate_marks: bool = boolean_option(
         "Put objective markers on the map",
         MISSION_GENERATOR_PAGE,
