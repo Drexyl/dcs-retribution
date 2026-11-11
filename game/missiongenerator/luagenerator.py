@@ -438,7 +438,20 @@ class LuaGenerator:
         trigger = TriggerStart(comment=f"Load {script_mnemonic}")
         filename = script_path.resolve()
         fileref = self.mission.map_resource.add_resource_file(filename)
+        # Tells the script profiler which file this is; DCS itself only knows it
+        # by a temporary name.
+        trigger.add_action(
+            DoScript(
+                String(
+                    "if RetProfiler then RetProfiler.loading("
+                    f'"{plugin_mnemonic}/{script}") end'
+                )
+            )
+        )
         trigger.add_action(DoScriptFile(fileref))
+        trigger.add_action(
+            DoScript(String("if RetProfiler then RetProfiler.loading(nil) end"))
+        )
         self.mission.triggerrules.triggers.append(trigger)
 
     def inject_other_plugin_resources(self, plugin_mnemonic: str, file: str) -> None:

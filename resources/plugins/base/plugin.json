@@ -5,6 +5,10 @@
     "specificOptions": [],
     "scriptsWorkOrders": [
         {
+            "file": "script_profiler.lua",
+            "mnemonic": "script_profiler"
+        },
+        {
             "file": "Moose.lua",
             "mnemonic": "moose"
         },

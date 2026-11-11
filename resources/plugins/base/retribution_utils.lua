@@ -139,7 +139,14 @@ end
 -- @return true and the function's first result, or false on error.
 function RetUtils.guardedCall(label, fn, ...)
     local started = clock and clock()
-    local ok, result = pcall(fn, ...)
+    local ok, result
+    if RetProfiler then
+        -- Books the time under fn's own script rather than under the MOOSE
+        -- timer that called it.
+        ok, result = pcall(RetProfiler.measure, fn, ...)
+    else
+        ok, result = pcall(fn, ...)
+    end
     if not ok then
         env.error(
             string.format(

@@ -1545,6 +1545,7 @@ class PretenseLuaGenerator(LuaGenerator):
         # The Pretense scripts run on MOOSE and Retribution's helper library, so
         # both must be loaded before pretense_compiled.lua. The mnemonics match the
         # base plugin's work orders, which are then skipped as already loaded.
+        self.inject_plugin_script("base", "script_profiler.lua", "script_profiler")
         self.inject_plugin_script("base", "Moose.lua", "moose")
         self.inject_plugin_script("base", "retribution_utils.lua", "retribution_utils")
 
@@ -1843,7 +1844,20 @@ class PretenseLuaGenerator(LuaGenerator):
         trigger = TriggerStart(comment=f"Load {script_mnemonic}")
         filename = script_path.resolve()
         fileref = self.mission.map_resource.add_resource_file(filename)
+        # Tells the script profiler which file this is; DCS itself only knows it
+        # by a temporary name.
+        trigger.add_action(
+            DoScript(
+                String(
+                    "if RetProfiler then RetProfiler.loading("
+                    f'"{plugin_mnemonic}/{script}") end'
+                )
+            )
+        )
         trigger.add_action(DoScriptFile(fileref))
+        trigger.add_action(
+            DoScript(String("if RetProfiler then RetProfiler.loading(nil) end"))
+        )
         self.mission.triggerrules.triggers.append(trigger)
 
     def inject_plugins(self) -> None:
