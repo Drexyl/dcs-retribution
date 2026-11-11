@@ -42,6 +42,21 @@ PRETENSE_RED_SIDE = 1
 PRETENSE_BLUE_SIDE = 2
 PRETENSE_NUMBER_OF_ZONES_TO_CONNECT_CARRIERS_TO = 2
 
+# Plugins that are built on MOOSE classes and have never run in Pretense
+# missions. They used to be kept out by blocking Moose.lua itself; the base
+# plugin and the Pretense scripts now need MOOSE as a library, so these plugins
+# are excluded by name instead.
+PRETENSE_EXCLUDED_PLUGINS = frozenset(
+    {
+        "airboss",
+        "bigeye",
+        "mooseautolase",
+        "moosemarkerops",
+        "moosesoundhandler",
+        "opscsar",
+    }
+)
+
 
 @dataclass
 class PretenseSam:
@@ -1527,7 +1542,11 @@ class PretenseLuaGenerator(LuaGenerator):
         return lua_string_connman
 
     def generate_pretense_plugin_data(self) -> None:
-        self.inject_plugin_script("base", "mist_4_5_126.lua", "mist_4_5_126")
+        # The Pretense scripts run on MOOSE and Retribution's helper library, so
+        # both must be loaded before pretense_compiled.lua. The mnemonics match the
+        # base plugin's work orders, which are then skipped as already loaded.
+        self.inject_plugin_script("base", "Moose.lua", "moose")
+        self.inject_plugin_script("base", "retribution_utils.lua", "retribution_utils")
 
         lua_string_config = "Config = Config or {}\n"
 
@@ -1801,10 +1820,11 @@ class PretenseLuaGenerator(LuaGenerator):
     def inject_plugin_script(
         self, plugin_mnemonic: str, script: str, script_mnemonic: str
     ) -> None:
-        # Hard block MOOSE injection for Pretense missions
-        if script_mnemonic.lower() == "moose" or "moose" in script.lower():
+        # MOOSE-based plugins are not supported in Pretense missions.
+        if plugin_mnemonic.lower() in PRETENSE_EXCLUDED_PLUGINS:
             logging.info(
-                "PretenseLuaGenerator: Skipping hard-blocked Moose.lua injection"
+                f"PretenseLuaGenerator: Skipping {script} of MOOSE-based plugin "
+                f"{plugin_mnemonic}"
             )
             return
 

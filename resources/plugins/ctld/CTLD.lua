@@ -775,7 +775,7 @@ function ctld.cratesInZone(_zone, _flagNumber)
         return
     end
 
-    local _zonePos = mist.utils.zoneToVec3(_zone)
+    local _zonePos = _triggerZone.point
 
     --ignore side, if crate has been used its discounted from the count
     local _crateTables = { ctld.spawnedCratesRED, ctld.spawnedCratesBLUE, ctld.missionEditorCargoCrates }
@@ -909,7 +909,7 @@ function ctld.countDroppedGroupsInZone(_zone, _blueFlag, _redFlag)
         return
     end
 
-    local _zonePos = mist.utils.zoneToVec3(_zone)
+    local _zonePos = _triggerZone.point
 
     local _redCount = 0;
     local _blueCount = 0;
@@ -920,7 +920,6 @@ function ctld.countDroppedGroupsInZone(_zone, _blueFlag, _redFlag)
             local _groupUnits = ctld.getGroup(_groupName)
 
             if #_groupUnits > 0 then
-                local _zonePos = mist.utils.zoneToVec3(_zone)
                 local _dist = ctld.getDistance(_groupUnits[1]:getPoint(), _zonePos)
 
                 if _dist <= _triggerZone.radius then
@@ -956,7 +955,7 @@ function ctld.countDroppedUnitsInZone(_zone, _blueFlag, _redFlag)
         return
     end
 
-    local _zonePos = mist.utils.zoneToVec3(_zone)
+    local _zonePos = _triggerZone.point
 
     local _redCount = 0;
     local _blueCount = 0;
@@ -969,7 +968,6 @@ function ctld.countDroppedUnitsInZone(_zone, _blueFlag, _redFlag)
 
             if #_groupUnits > 0 then
 
-                local _zonePos = mist.utils.zoneToVec3(_zone)
                 for _,_unit in pairs(_groupUnits) do
                     local _dist = ctld.getDistance(_unit:getPoint(), _zonePos)
 
@@ -1010,7 +1008,7 @@ function ctld.createRadioBeaconAtZone(_zone, _coalition, _batteryLife, _name)
         return
     end
 
-    local _zonePos = mist.utils.zoneToVec3(_zone)
+    local _zonePos = _triggerZone.point
 
     ctld.beaconCount = ctld.beaconCount + 1
 
@@ -1552,11 +1550,10 @@ function ctld.spawnCrateStatic(_country, _unitId, _point, _name, _weight,_side)
 
         _group.units[1] = ctld.createUnit(_point.x , _point.z , 0, {type="UAZ-469",name=_name,unitId=_unitId})
 
-        --switch to MIST
         _group.category = Group.Category.GROUND;
         _group.country = _country;
 
-        local _spawnedGroup = Group.getByName(mist.dynAdd(_group).name)
+        local _spawnedGroup = Group.getByName(RetUtils.spawnGroup(_group).name)
 
         -- Turn off AI
         trigger.action.setGroupAIOff(_spawnedGroup)
@@ -1565,10 +1562,10 @@ function ctld.spawnCrateStatic(_country, _unitId, _point, _name, _weight,_side)
     else
 
         if ctld.slingLoad then
-            _crate = mist.utils.deepCopy(ctld.spawnableCratesModel_sling)
+            _crate = UTILS.DeepCopy(ctld.spawnableCratesModel_sling)
             _crate["canCargo"] = true
     	else
-            _crate = mist.utils.deepCopy(ctld.spawnableCratesModel_load)
+            _crate = UTILS.DeepCopy(ctld.spawnableCratesModel_load)
             _crate["canCargo"] = false
         end
 
@@ -1580,7 +1577,7 @@ function ctld.spawnCrateStatic(_country, _unitId, _point, _name, _weight,_side)
         _crate["country"] = _country
 
         ctld.logTrace(string.format("_crate=%s", ctld.p(_crate)))
-        mist.dynAddStatic(_crate)
+        RetUtils.spawnStatic(_crate)
 
         _spawnedCrate = StaticObject.getByName(_crate["name"])
     end
@@ -1613,7 +1610,7 @@ function ctld.spawnFOBCrateStatic(_country, _unitId, _point, _name)
 
     _crate["country"] = _country
 
-    mist.dynAddStatic(_crate)
+    RetUtils.spawnStatic(_crate)
 
     local _spawnedCrate = StaticObject.getByName(_crate["name"])
     --local _spawnedCrate = coalition.addStaticObject(_country, _crate)
@@ -1636,7 +1633,7 @@ function ctld.spawnFOB(_country, _unitId, _point, _name)
     }
 
     _crate["country"] = _country
-    mist.dynAddStatic(_crate)
+    RetUtils.spawnStatic(_crate)
     local _spawnedCrate = StaticObject.getByName(_crate["name"])
     --local _spawnedCrate = coalition.addStaticObject(_country, _crate)
 
@@ -1655,7 +1652,7 @@ function ctld.spawnFOB(_country, _unitId, _point, _name)
     --coalition.addStaticObject(_country, _tower)
     _tower["country"] = _country
 
-    mist.dynAddStatic(_tower)
+    RetUtils.spawnStatic(_tower)
 
     return _spawnedCrate
 end
@@ -1819,7 +1816,7 @@ function ctld.safeToFastRope(_heli)
     end
 
     --landed or speed is less than 8 km/h and height is less than fast rope height
-    if (ctld.inAir(_heli) == false or (ctld.heightDiff(_heli) <= ctld.fastRopeMaximumHeight + 3.0 and mist.vec.mag(_heli:getVelocity()) < 2.2)) then
+    if (ctld.inAir(_heli) == false or (ctld.heightDiff(_heli) <= ctld.fastRopeMaximumHeight + 3.0 and UTILS.VecNorm(_heli:getVelocity()) < 2.2)) then
         return true
     end
 end
@@ -1828,7 +1825,7 @@ function ctld.metersToFeet(_meters)
 
     local _feet = _meters * 3.2808399
 
-    return mist.utils.round(_feet)
+    return UTILS.Round(_feet)
 end
 
 function ctld.inAir(_heli)
@@ -1839,7 +1836,7 @@ function ctld.inAir(_heli)
 
     -- less than 5 cm/s a second so landed
     -- BUT AI can hold a perfect hover so ignore AI
-    if mist.vec.mag(_heli:getVelocity()) < 0.05 and _heli:getPlayerName() ~= nil then
+    if UTILS.VecNorm(_heli:getVelocity()) < 0.05 and _heli:getPlayerName() ~= nil then
         return false
     end
     return true
@@ -2686,7 +2683,7 @@ function ctld.checkHoverStatus()
 
                                 _crate.crateUnit:destroy()
 
-                                local _copiedCrate = mist.utils.deepCopy(_crate.details)
+                                local _copiedCrate = UTILS.DeepCopy(_crate.details)
                                 _copiedCrate.simulatedSlingload = true
                                 --ctld.logTrace(string.format("_copiedCrate = %s", ctld.p(_copiedCrate)))
                                 ctld.inTransitSlingLoadCrates[_name] = _copiedCrate
@@ -2746,7 +2743,7 @@ function ctld.loadNearbyCrate(_name)
 
                     _crate.crateUnit:destroy()
 
-                    local _copiedCrate = mist.utils.deepCopy(_crate.details)
+                    local _copiedCrate = UTILS.DeepCopy(_crate.details)
                     _copiedCrate.simulatedSlingload = true
                     ctld.inTransitSlingLoadCrates[_name] = _copiedCrate
                     ctld.adaptWeightToCargo(_name)
@@ -2814,17 +2811,18 @@ function ctld.getClockDirection(_heli, _crate)
 
     local _position = _crate:getPosition().p -- get position of crate
     local _playerPosition = _heli:getPosition().p -- get position of helicopter
-    local _relativePosition = mist.vec.sub(_position, _playerPosition)
+    local _relativePosition = UTILS.VecSubstract(_position, _playerPosition)
 
-    local _playerHeading = mist.getHeading(_heli) -- the rest of the code determines the 'o'clock' bearing of the missile relative to the helicopter
+    local _heliPosition = _heli:getPosition()
+    local _playerHeading = UTILS.GetDirectionRadians(_heliPosition.x, _heliPosition.p) -- the rest of the code determines the 'o'clock' bearing of the missile relative to the helicopter
 
     local _headingVector = { x = math.cos(_playerHeading), y = 0, z = math.sin(_playerHeading) }
 
     local _headingVectorPerpendicular = { x = math.cos(_playerHeading + math.pi / 2), y = 0, z = math.sin(_playerHeading + math.pi / 2) }
 
-    local _forwardDistance = mist.vec.dp(_relativePosition, _headingVector)
+    local _forwardDistance = UTILS.VecDot(_relativePosition, _headingVector)
 
-    local _rightDistance = mist.vec.dp(_relativePosition, _headingVectorPerpendicular)
+    local _rightDistance = UTILS.VecDot(_relativePosition, _headingVectorPerpendicular)
 
     local _angle = math.atan2(_rightDistance, _forwardDistance) * 180 / math.pi
 
@@ -2842,14 +2840,14 @@ end
 
 function ctld.getCompassBearing(_ref, _unitPos)
 
-    _ref = mist.utils.makeVec3(_ref, 0) -- turn it into Vec3 if it is not already.
-    _unitPos = mist.utils.makeVec3(_unitPos, 0) -- turn it into Vec3 if it is not already.
+    _ref = UTILS.Vec2toVec3(_ref, 0) -- turn it into Vec3 if it is not already.
+    _unitPos = UTILS.Vec2toVec3(_unitPos, 0) -- turn it into Vec3 if it is not already.
 
     local _vec = { x = _unitPos.x - _ref.x, y = _unitPos.y - _ref.y, z = _unitPos.z - _ref.z }
 
-    local _dir = mist.utils.getDir(_vec, _ref)
+    local _dir = UTILS.GetDirectionRadians(_vec, _ref)
 
-    local _bearing = mist.utils.round(mist.utils.toDegree(_dir), 0)
+    local _bearing = UTILS.Round(UTILS.ToDegree(_dir), 0)
 
     return _bearing
 end
@@ -2947,9 +2945,9 @@ function ctld.getFOBPositionString(_fob)
 
     local _lat, _lon = coord.LOtoLL(_fob:getPosition().p)
 
-    local _latLngStr = mist.tostringLL(_lat, _lon, 3, ctld.location_DMS)
+    local _latLngStr = UTILS.tostringLL(_lat, _lon, 3, ctld.location_DMS)
 
-    --   local _mgrsString = mist.tostringMGRS(coord.LLtoMGRS(coord.LOtoLL(_fob:getPosition().p)), 5)
+    --   local _mgrsString = UTILS.tostringMGRS(coord.LLtoMGRS(coord.LOtoLL(_fob:getPosition().p)), 5)
 
     local _message = _latLngStr
 
@@ -3073,7 +3071,7 @@ function ctld.findNearestAASystem(_heli,_aaSystem)
 
         local _hawkGroup = Group.getByName(_groupName)
 
-        --  env.info(_groupName..": "..mist.utils.tableShow(_hawkDetails))
+        --  env.info(_groupName..": "..UTILS.TableShow(_hawkDetails))
         if _hawkGroup ~= nil and _hawkGroup:getCoalition() == _heli:getCoalition() and _hawkDetails[1].system.name == _aaSystem.name then
 
             local _units = _hawkGroup:getUnits()
@@ -3409,9 +3407,9 @@ function ctld.createRadioBeacon(_point, _coalition, _country, _name, _batteryTim
 
     local _lat, _lon = coord.LOtoLL(_point)
 
-    local _latLngStr = mist.tostringLL(_lat, _lon, 3, ctld.location_DMS)
+    local _latLngStr = UTILS.tostringLL(_lat, _lon, 3, ctld.location_DMS)
 
-    --local _mgrsString = mist.tostringMGRS(coord.LLtoMGRS(coord.LOtoLL(_point)), 5)
+    --local _mgrsString = UTILS.tostringMGRS(coord.LLtoMGRS(coord.LOtoLL(_point)), 5)
 
     local _message = _name
 
@@ -3511,13 +3509,13 @@ function ctld.spawnRadioBeaconUnit(_point, _country, _type)
         --        ["x"] = _positions[1].x,
         ["name"] = _type .. " Radio Beacon Group #" .. _groupId,
         ["task"] = {},
-        --added two fields below for MIST
+        --added two fields below for RetUtils.spawnGroup
         ["category"] = Group.Category.GROUND,
         ["country"] = _country
     }
 
     -- return coalition.addGroup(_country, Group.Category.GROUND, _radioGroup)
-    return Group.getByName(mist.dynAdd(_radioGroup).name)
+    return Group.getByName(RetUtils.spawnGroup(_radioGroup).name)
 end
 
 function ctld.updateRadioBeacon(_beaconDetails)
@@ -3562,7 +3560,7 @@ function ctld.updateRadioBeacon(_beaconDetails)
 
     --fobs have unlimited battery life
     --    if _battery ~= -1 then
-    --        _text = _text.." "..mist.utils.round(_batLife).." seconds of battery"
+    --        _text = _text.." "..UTILS.Round(_batLife).." seconds of battery"
     --    end
 
     for _, _radio in pairs(_radioLoop) do
@@ -3982,7 +3980,7 @@ function ctld.countCompleteAASystems(_heli)
 
         local _hawkGroup = Group.getByName(_groupName)
 
-        --  env.info(_groupName..": "..mist.utils.tableShow(_hawkDetails))
+        --  env.info(_groupName..": "..UTILS.TableShow(_hawkDetails))
         if _hawkGroup ~= nil and _hawkGroup:getCoalition() == _heli:getCoalition() then
 
             local _units = _hawkGroup:getUnits()
@@ -4169,11 +4167,10 @@ function ctld.spawnCrateGroup(_heli, _positions, _types)
         end
     end
 
-    --mist function
     _group.category = Group.Category.GROUND
     _group.country = _heli:getCountry()
 
-    local _spawnedGroup = Group.getByName(mist.dynAdd(_group).name)
+    local _spawnedGroup = Group.getByName(RetUtils.spawnGroup(_group).name)
 
     return _spawnedGroup
 end
@@ -4227,11 +4224,10 @@ function ctld.spawnDroppedGroup(_point, _details, _spawnBehind, _maxSearch)
         end
     end
 
-    --switch to MIST
     _group.category = Group.Category.GROUND;
     _group.country = _details.country;
 
-    local _spawnedGroup = Group.getByName(mist.dynAdd(_group).name)
+    local _spawnedGroup = Group.getByName(RetUtils.spawnGroup(_group).name)
 
     --local _spawnedGroup = coalition.addGroup(_details.country, Group.Category.GROUND, _group)
 
@@ -4420,8 +4416,8 @@ function ctld.orderGroupToMoveToPoint(_leader, _destination)
     local _group = _leader:getGroup()
 
     local _path = {}
-    table.insert(_path, mist.ground.buildWP(_leader:getPoint(), 'Off Road', 50))
-    table.insert(_path, mist.ground.buildWP(_destination, 'Off Road', 50))
+    table.insert(_path, RetUtils.groundWaypoint(_leader:getPoint(), 'Off Road', 50))
+    table.insert(_path, RetUtils.groundWaypoint(_destination, 'Off Road', 50))
 
     local _mission = {
         id = 'Mission',
@@ -5144,7 +5140,7 @@ function ctld.addJTACRadioCommand(_side)
                                 ctld.logTrace(string.format("jtacGroupSubMenuPath for %s is : %s", ctld.p(_jtacGroupName), ctld.p(ctld.jtacGroupSubMenuPath[_jtacGroupName])))
 
                                 --make a copy of the JTAC group submenu's path to insert the target's list on as many pages as required. The JTAC's group submenu path only leads to the first page
-                                local jtacTargetPagePath = mist.utils.deepCopy(ctld.jtacGroupSubMenuPath[_jtacGroupName])
+                                local jtacTargetPagePath = UTILS.DeepCopy(ctld.jtacGroupSubMenuPath[_jtacGroupName])
                                 --add a reset targeting option to revert to automatic JTAC unit targeting
                                 missionCommands.addCommandForGroup(_groupId, "Reset TGT Selection", jtacTargetPagePath, ctld.setJTACTarget, {jtacGroupName = _jtacGroupName, targetName = nil})
                                 
@@ -5198,12 +5194,7 @@ end
 
 function ctld.getGroupId(_unit)
 
-    local _unitDB =  mist.DBs.unitsById[tonumber(_unit:getID())]
-    if _unitDB ~= nil and _unitDB.groupId then
-        return _unitDB.groupId
-    end
-
-    return nil
+    return RetUtils.getGroupId(_unit)
 end
 
 --get distance in meters assuming a Flat world
@@ -6362,9 +6353,9 @@ function ctld.getPositionString(_unit)
 
     local _lat, _lon = coord.LOtoLL(_unit:getPosition().p)
 
-    local _latLngStr = mist.tostringLL(_lat, _lon, 3, ctld.location_DMS)
+    local _latLngStr = UTILS.tostringLL(_lat, _lon, 3, ctld.location_DMS)
 
-    local _mgrsString = mist.tostringMGRS(coord.LLtoMGRS(coord.LOtoLL(_unit:getPosition().p)), 5)
+    local _mgrsString = UTILS.tostringMGRS(coord.LLtoMGRS(coord.LOtoLL(_unit:getPosition().p)), 5)
 
     return " @ " .. _latLngStr .. " - MGRS " .. _mgrsString
 end
@@ -6381,7 +6372,7 @@ function ctld.initialize(force)
         return
     end
 
-    assert(mist ~= nil, "\n\n** HEY MISSION-DESIGNER! **\n\nMiST has not been loaded!\n\nMake sure MiST 3.6 or higher is running\n*before* running this script!\n")
+    assert(RetUtils ~= nil and UTILS ~= nil, "\n\n** HEY MISSION-DESIGNER! **\n\nMOOSE and retribution_utils.lua have not been loaded!\n\nMake sure both are running\n*before* running this script!\n")
 
     ctld.addedTo = {}
     ctld.spawnedCratesRED = {} -- use to store crates that have been spawned

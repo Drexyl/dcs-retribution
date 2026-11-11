@@ -74,7 +74,7 @@ function Spawner.getData(objtype, name, pos, side, minDist, maxDist, surfaceType
         -- even if a good location was not found.
         if not surfaceTypes[land.getSurfaceType(pos)] then
             for i=1,500,1 do
-                pos = mist.getRandPointInCircle(pos, maxDist)
+                pos = RetUtils.getRandPointInCircle(pos, maxDist)
 
                 -- If spawning inside a zone, ensure the point is inside it
                 if zone then

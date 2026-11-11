@@ -42,7 +42,7 @@ timer.scheduleFunction(function(param, time)
 		local g = Group.getByName(grname)
 		if zn.side == 2 then
 			if not g then
-				local err, msg = pcall(mist.respawnGroup,grname,true)
+				local err, msg = pcall(RetUtils.respawnGroup,grname)
 				if not err then
 					env.info("ERROR spawning "..grname)
 					env.info(msg)

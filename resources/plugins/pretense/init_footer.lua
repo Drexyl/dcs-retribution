@@ -61,7 +61,7 @@ timer.scheduleFunction(function(param, time)
 		local red = nil
 		local minD = 999999999
 		for i,v in ipairs(availableRed) do
-			local d = mist.utils.get2DDist(zn.zone.point, supplyPointRegistry.red[v])
+			local d = RetUtils.get2DDist(zn.zone.point, supplyPointRegistry.red[v])
 			if d < minD then
 				red = v
 				minD = d
@@ -72,7 +72,7 @@ timer.scheduleFunction(function(param, time)
 
 		local gr = red
 		red = nil
-		mist.respawnGroup(gr, true)
+		RetUtils.respawnGroup(gr)
 		offmapSupplyRegistry[gr] = {zone = zn, assigned = timer.getAbsTime()}
 		env.info(gr..' was deployed')
 		timer.scheduleFunction(function(param,time)
@@ -88,7 +88,7 @@ timer.scheduleFunction(function(param, time)
 		local blue = nil
 		local minD = 999999999
 		for i,v in ipairs(availableBlue) do
-			local d = mist.utils.get2DDist(zn.zone.point, supplyPointRegistry.blue[v])
+			local d = RetUtils.get2DDist(zn.zone.point, supplyPointRegistry.blue[v])
 			if d < minD then
 				blue = v
 				minD = d
@@ -99,7 +99,7 @@ timer.scheduleFunction(function(param, time)
 
 		local gr = blue
 		blue = nil
-		mist.respawnGroup(gr, true)
+		RetUtils.respawnGroup(gr)
 		offmapSupplyRegistry[gr] = {zone = zn, assigned = timer.getAbsTime()}
 		env.info(gr..' was deployed')
 		timer.scheduleFunction(function(param,time)

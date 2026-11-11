@@ -1,7 +1,18 @@
 -- the state.json file will be updated according to this schedule and on mission end
 local WRITESTATE_SCHEDULE_IN_SECONDS = 15
 
-logger = mist.Logger:new("DCSRetribution", "info")
+-- Minimal logger writing to dcs.log. Global: other plugins (e.g. LotATC export)
+-- log through it.
+logger = {}
+function logger:info(message)
+    env.info("DCSRetribution|" .. tostring(message))
+end
+function logger:warn(message)
+    env.warning("DCSRetribution|" .. tostring(message))
+end
+function logger:error(message)
+    env.error("DCSRetribution|" .. tostring(message))
+end
 logger:info("Check that json.lua is loaded : json = "..tostring(json))
 
 crash_events = {} -- killed aircraft will be added via S_EVENT_CRASH event
@@ -20,11 +31,7 @@ local function ends_with(str, ending)
 end
 
 local function messageAll(message)
-    local msg = {}
-    msg.text = message
-    msg.displayTime = 25
-    msg.msgFor = {coa = {'all'}}
-    mist.message.add(msg)
+    MESSAGE:New(message, 25):ToAll()
 end
 
 function write_state()
@@ -167,7 +174,7 @@ write_state_error_handling = function()
     if mission_ended and dirty_state then
         next_schedule_in_seconds = 1
     end
-    mist.scheduleFunction(write_state_error_handling, {}, timer.getTime() + next_schedule_in_seconds)
+    TIMER:New(write_state_error_handling):Start(next_schedule_in_seconds)
 end
 
 activeWeapons = {}
@@ -195,7 +202,10 @@ local function onEvent(event)
         destruction.y = position.p.y
         destruction.z = position.p.z
         destruction.type = event.initiator:getTypeName()
-        destruction.orientation = mist.getHeading(event.initiator) * 57.3
+        -- True heading in degrees (grid heading plus the map's north correction).
+        destruction.orientation = math.deg(
+            UTILS.GetDirectionRadians(position.x, position.p)
+        )
         -- Only track actual units/buildings, not debris/crash models
         if destruction.type ~= nil and 
            string.find(destruction.type, "GENERIC_CRASH_MODEL") == nil and
@@ -249,7 +259,11 @@ local function onEvent(event)
 
 end
 
-mist.addEventHandler(onEvent)
+world.addEventHandler({
+    onEvent = function(_, event)
+        onEvent(event)
+    end,
+})
 
 dirty_state = true
 write_state_error_handling()
@@ -263,9 +277,10 @@ local function escort_leash_get_group(id)
     if not group_id or group_id <= 0 then
         return nil
     end
-    -- DCS has no Group.getByID; resolve the mission group id to a name via mist.
-    local data = mist.DBs.groupsById and mist.DBs.groupsById[group_id]
-    return data and Group.getByName(data.groupName) or nil
+    -- DCS has no Group.getByID; resolve the mission group id to a name via the
+    -- MOOSE template database.
+    local name = RetUtils.getGroupNameById(group_id)
+    return name and Group.getByName(name) or nil
 end
 
 local function escort_leash_set_roe(group, roe)

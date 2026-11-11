@@ -3,7 +3,8 @@
 
 Generates a self-contained Caucasus .miz that reproduces the "carrier hugs the
 shore, escorts spawn on land" case the naval relocation handles, wired up exactly
-like Retribution wires the base plugin: mist loads first, then land_relocate.lua,
+like Retribution wires the base plugin: MOOSE and retribution_utils.lua load
+first, then land_relocate.lua,
 then a small diagnostic script that logs every ship's surface type and position.
 
 Run from the repo root:
@@ -121,7 +122,8 @@ def main() -> None:
         escorts.add_unit(unit)
 
     # Wire up the plugin scripts in the same order the base plugin does.
-    _load_script_file(mission, "mist_4_5_126.lua", "Load mist")
+    _load_script_file(mission, "Moose.lua", "Load moose")
+    _load_script_file(mission, "retribution_utils.lua", "Load retribution_utils")
     _load_script_file(mission, "land_relocate.lua", "Load land_relocate")
 
     diagnostic = TriggerStart(comment="Load relocate diagnostic")

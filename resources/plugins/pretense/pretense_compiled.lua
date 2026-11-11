@@ -16,7 +16,8 @@ Pretense Manual: <https://github.com/Dzsek/pretense>
 
 If you'd like to buy me a beer: <https://www.buymeacoffee.com/dzsek>
 
-Makes use of Mission scripting tools (Mist): <https://github.com/mrSkortch/MissionScriptingTools>
+This DCS Retribution build runs on MOOSE and Retribution's retribution_utils.lua instead of
+Mission scripting tools (Mist), which the upstream script uses.
 
 @script PDME
 @author Dzsekeb
@@ -177,12 +178,12 @@ do
 	end
 	
 	function Utils.isLanded(unit, ignorespeed)
-		--return (Utils.getAGL(unit)<5 and mist.vec.mag(unit:getVelocity())<0.10)
+		--return (Utils.getAGL(unit)<5 and UTILS.VecNorm(unit:getVelocity())<0.10)
 		
 		if ignorespeed then
 			return not unit:inAir()
 		else
-			return (not unit:inAir() and mist.vec.mag(unit:getVelocity())<1)
+			return (not unit:inAir() and UTILS.VecNorm(unit:getVelocity())<1)
 		end
 	end
 
@@ -214,7 +215,7 @@ do
 	end
 
 	function Utils.isInCircle(point, center, radius)
-		local dist = mist.utils.get2DDist(point, center)
+		local dist = RetUtils.get2DDist(point, center)
 		return dist<radius
 	end
 	
@@ -471,17 +472,27 @@ end
 
 CustomZone = {}
 do
+	-- Mission trigger zones indexed by name. The zone list never changes during a
+	-- mission, so it is indexed once instead of being scanned on every lookup.
+	local zoneDataByName = nil
+	local function findZoneData(name)
+		if not zoneDataByName then
+			zoneDataByName = {}
+			for _,v in ipairs(env.mission.triggers.zones) do
+				-- the first zone with a given name wins, like the scan this replaces
+				if zoneDataByName[v.name] == nil then
+					zoneDataByName[v.name] = v
+				end
+			end
+		end
+		return zoneDataByName[name]
+	end
+
 	function CustomZone:getByName(name)
 		local obj = {}
 		obj.name = name
 		
-		local zd = nil
-		for _,v in ipairs(env.mission.triggers.zones) do
-			if v.name == name then
-				zd = v
-				break
-			end
-		end
+		local zd = findZoneData(name)
 		
 		if not zd then
 			return nil
@@ -522,10 +533,10 @@ do
 	
 	function CustomZone:isInside(point)
 		if self:isCircle() then
-			local dist = mist.utils.get2DDist(point, self.point)
+			local dist = RetUtils.get2DDist(point, self.point)
 			return dist<self.radius
 		elseif self:isQuad() then
-			return mist.pointInPolygon(point, self.vertices)
+			return UTILS.IsPointInPolygon(point, self.vertices)
 		end
 	end
 	
@@ -572,13 +583,13 @@ do
 			}
 		end
 		
-		local pnt = mist.getRandomPointInZone(spname)
+		local pnt = ZONE:FindByName(spname):GetRandomVec2()
 		for i=1,500,1 do
 			if acceptedSurface[land.getSurfaceType(pnt)] then
 				break
 			end
 
-			pnt = mist.getRandomPointInZone(spname)
+			pnt = ZONE:FindByName(spname):GetRandomVec2()
 		end
 
 		local newgr = Spawner.createObject(product.name, product.template, pnt, product.side, nil, nil, acceptedSurface, spname)
@@ -1074,7 +1085,7 @@ do
 				local xp = amount*RewardDefinitions.actions.supplyRatio
 
 				local totalboost = 0
-				local dist = mist.utils.get2DDist(lastLoad.zone.point, zone.zone.point)
+				local dist = RetUtils.get2DDist(lastLoad.zone.point, zone.zone.point)
 				if dist > 15000 then
 					local extradist = math.max(dist - 15000, 85000)
 					local kmboost = extradist/85000
@@ -1377,8 +1388,8 @@ do
 							trigger.action.outTextForUnit(un:getID(), 'Cargo door closed', 1)
 						elseif Utils.getAGL(un) > 70 then
 							trigger.action.outTextForUnit(un:getID(), 'Altitude too high (< 70 m). Current: '..string.format('%.2f',Utils.getAGL(un))..' m', 1)
-						elseif mist.vec.mag(un:getVelocity())>5 then
-							trigger.action.outTextForUnit(un:getID(), 'Moving too fast (< 5 m/s). Current: '..string.format('%.2f',mist.vec.mag(un:getVelocity()))..' m/s', 1)
+						elseif UTILS.VecNorm(un:getVelocity())>5 then
+							trigger.action.outTextForUnit(un:getID(), 'Moving too fast (< 5 m/s). Current: '..string.format('%.2f',UTILS.VecNorm(un:getVelocity()))..' m/s', 1)
 						else
 							if data.dist > 100 then
 								trigger.action.outTextForUnit(un:getID(), 'Too far (< 100m). Current: '..string.format('%.2f',data.dist)..' m', 1)
@@ -2228,7 +2239,7 @@ do
 								local frUnit = gr:getUnit(1)
 								local pos = frUnit:getPoint()
 
-								mist.teleportToPoint({
+								RetUtils.teleportGroup({
 									groupName = group.name,
 									action = 'teleport',
 									initTasks = false,
@@ -2271,7 +2282,7 @@ do
 										if tgt.visible and tgt.object then
 											if tgt.object.isExist and tgt.object:isExist() and tgt.object.getCoalition and tgt.object:getCoalition()~=frUnit:getCoalition() and 
 												Object.getCategory(tgt.object) == 1 then
-												local dist = mist.utils.get3DDist(frUnit:getPoint(), tgt.object:getPoint())
+												local dist = UTILS.VecDist3D(frUnit:getPoint(), tgt.object:getPoint())
 												if dist < 700 then
 													if not group.isstopped then
 														env.info('GroupMonitor: processSurface ['..group.name..'] stopping to engage targets')
@@ -2326,7 +2337,7 @@ do
 										group.unstuck_attempts = 0
 										local pos = frUnit:getPoint()
 
-										mist.teleportToPoint({
+										RetUtils.teleportGroup({
 											groupName = group.name,
 											action = 'teleport',
 											initTasks = false,
@@ -2438,15 +2449,15 @@ do
 		if gr:getSize() == 0 then return false end
 
 		local un = gr:getUnit(1)
-		if un and un:isExist() and mist.vec.mag(un:getVelocity()) >= 0.01 and group.stuck_marker > 0 then
+		if un and un:isExist() and UTILS.VecNorm(un:getVelocity()) >= 0.01 and group.stuck_marker > 0 then
 			group.stuck_marker = 0
 			group.unstuck_attempts = 0
-			env.info('GroupMonitor: isStuck ['..group.name..'] is moving, reseting stuck marker velocity='..mist.vec.mag(un:getVelocity()))
+			env.info('GroupMonitor: isStuck ['..group.name..'] is moving, reseting stuck marker velocity='..UTILS.VecNorm(un:getVelocity()))
 		end
 
-		if un and un:isExist() and mist.vec.mag(un:getVelocity()) < 0.01 then
+		if un and un:isExist() and UTILS.VecNorm(un:getVelocity()) < 0.01 then
 			group.stuck_marker = group.stuck_marker + 1
-			env.info('GroupMonitor: isStuck ['..group.name..'] is not moving, increasing stuck marker to '..group.stuck_marker..' velocity='..mist.vec.mag(un:getVelocity()))
+			env.info('GroupMonitor: isStuck ['..group.name..'] is not moving, increasing stuck marker to '..group.stuck_marker..' velocity='..UTILS.VecNorm(un:getVelocity()))
 
 			if group.stuck_marker >= 3 then
 				group.stuck_marker = 0
@@ -2562,7 +2573,7 @@ do
 											tgt.object.getCoalition and tgt.object:getCoalition()~=frUnit:getCoalition() and 
 											Unit.getCategoryEx(tgt.object) == Unit.Category.GROUND_UNIT then
 
-											local dist = mist.utils.get3DDist(frUnit:getPoint(), tgt.object:getPoint())
+											local dist = UTILS.VecDist3D(frUnit:getPoint(), tgt.object:getPoint())
 											if dist < 2000 then
 												table.insert(tgtToEngage, tgt.object)
 											end
@@ -4487,20 +4498,20 @@ do
 		
 		--group restrictions
 		obj.spawns = {}
-		for i,v in pairs(mist.DBs.groupsByName) do
-			if v.units[1].skill == 'Client' then
+		for i,v in pairs(_DATABASE.Templates.Groups) do
+			if v.Template.units[1] and v.Template.units[1].skill == 'Client' then
 				local zn = obj.zone
 				local pos3d = {
-					x = v.units[1].point.x,
+					x = v.Template.units[1].x,
 					y = 0,
-					z = v.units[1].point.y
+					z = v.Template.units[1].y
 				}
 				
 				if zn and zn:isInside(pos3d) then
 					local coa = 0
-					if v.coalition=='blue' then
+					if v.CoalitionID == coalition.side.BLUE then
 						coa = 2
-					elseif v.coalition=='red' then
+					elseif v.CoalitionID == coalition.side.RED then
 						coa = 1
 					end
 					
@@ -4621,7 +4632,7 @@ do
 		local closest = nil
 		for i,v in pairs(ZoneCommand.allZones) do
 			if not side or side == v.side then
-				local d = mist.utils.get2DDist(v.zone.point, point)
+				local d = RetUtils.get2DDist(v.zone.point, point)
 				if d < minDist then
 					minDist = d
 					closest = v
@@ -4657,7 +4668,7 @@ do
 				if not st then st = Group.getByName(v.name) end
 				local pos = st:getPoint()
 
-				local d = mist.utils.get2DDist(pos, sourcePoint)
+				local d = RetUtils.get2DDist(pos, sourcePoint)
 				if d < minDist then
 					minDist = d;
 					closest = pos
@@ -5350,7 +5361,7 @@ do
 				else
 					for _,subtgt in pairs(tgt.neighbours) do
 						if subtgt.name ~= self.name and self:isSupplyMissionValid(product, subtgt) then
-							local dist = mist.utils.get2DDist(self.zone.point, subtgt.zone.point)
+							local dist = RetUtils.get2DDist(self.zone.point, subtgt.zone.point)
 							if dist < 50000 then
 								return true
 							end
@@ -5535,7 +5546,7 @@ do
 			initTasks = false
 		}
 
-		mist.teleportToPoint(vars)
+		RetUtils.teleportGroup(vars)
 	end
 
 	function ZoneCommand:reActivateSupplyConvoyMission(product, savedData)
@@ -5546,7 +5557,7 @@ do
 			supplyPoint = trigger.misc.getZone(zone.name)
 		end
 		if supplyPoint then 
-			mist.teleportToPoint(getDefaultPos(savedData, false))
+			RetUtils.teleportGroup(getDefaultPos(savedData, false))
 			DependencyManager.get("GroupMonitor"):registerGroup(product, zone, self, savedData)
 
 			product.lastMission = {zoneName = zone.name}
@@ -5565,7 +5576,7 @@ do
 			supplyPoint = trigger.misc.getZone(zone.name)
 		end
 		if supplyPoint then 
-			mist.teleportToPoint(getDefaultPos(savedData, false))
+			RetUtils.teleportGroup(getDefaultPos(savedData, false))
 			DependencyManager.get("GroupMonitor"):registerGroup(product, zone, self, savedData)
 
 			local tgtPoint = trigger.misc.getZone(zone.name)
@@ -5583,7 +5594,7 @@ do
 	function ZoneCommand:reActivateAirSupplyMission(product, savedData)
 		local zone = ZoneCommand.getZoneByName(savedData.lastMission.zoneName)
 
-		mist.teleportToPoint(getDefaultPos(savedData, true))
+		RetUtils.teleportGroup(getDefaultPos(savedData, true))
 		DependencyManager.get("GroupMonitor"):registerGroup(product, zone, self, savedData)
 
 		local supplyPoint = trigger.misc.getZone(zone.name..'-hsp')
@@ -5608,7 +5619,7 @@ do
 	function ZoneCommand:reActivateCasMission(product, isHelo, savedData)
 		local zone = ZoneCommand.getZoneByName(savedData.lastMission.zoneName)
 
-		mist.teleportToPoint(getDefaultPos(savedData, true))
+		RetUtils.teleportGroup(getDefaultPos(savedData, true))
 		DependencyManager.get("GroupMonitor"):registerGroup(product, zone, self, savedData)
 
 		local homePos = trigger.misc.getZone(savedData.homeName).point
@@ -5629,7 +5640,7 @@ do
 	function ZoneCommand:reActivateStrikeMission(product, savedData)
 		local zone = ZoneCommand.getZoneByName(savedData.lastMission.zoneName)
 
-		mist.teleportToPoint(getDefaultPos(savedData, true))
+		RetUtils.teleportGroup(getDefaultPos(savedData, true))
 
 		DependencyManager.get("GroupMonitor"):registerGroup(product, zone, self, savedData)
 
@@ -5647,7 +5658,7 @@ do
 	function ZoneCommand:reActivateSeadMission(product, savedData)
 		local zone = ZoneCommand.getZoneByName(savedData.lastMission.zoneName)
 
-		mist.teleportToPoint(getDefaultPos(savedData, true))
+		RetUtils.teleportGroup(getDefaultPos(savedData, true))
 		DependencyManager.get("GroupMonitor"):registerGroup(product, zone, self, savedData)
 
 		local homePos = trigger.misc.getZone(savedData.homeName).point
@@ -5665,7 +5676,7 @@ do
 
 		local zn1 = ZoneCommand.getZoneByName(savedData.lastMission.zone1name)
 
-		mist.teleportToPoint(getDefaultPos(savedData, true))
+		RetUtils.teleportGroup(getDefaultPos(savedData, true))
 		DependencyManager.get("GroupMonitor"):registerGroup(product, zn1, self, savedData)
 
 		local homePos = trigger.misc.getZone(savedData.homeName).point
@@ -5695,7 +5706,7 @@ do
 		local homePos = trigger.misc.getZone(savedData.homeName).point
 
 		if hasTarget then 
-			mist.teleportToPoint(getDefaultPos(savedData, true))
+			RetUtils.teleportGroup(getDefaultPos(savedData, true))
 			DependencyManager.get("GroupMonitor"):registerGroup(product, nil, self, savedData)
 
 			product.lastMission = { active = true }
@@ -5711,7 +5722,7 @@ do
 		local zone = ZoneCommand.getZoneByName(savedData.lastMission.zoneName)
 		local homePos = trigger.misc.getZone(savedData.homeName).point
 
-		mist.teleportToPoint(getDefaultPos(savedData, true))
+		RetUtils.teleportGroup(getDefaultPos(savedData, true))
 		DependencyManager.get("GroupMonitor"):registerGroup(product, nil, self, savedData)
 		timer.scheduleFunction(function(param)
 			local gr = Group.getByName(param.prod.name)
@@ -5734,7 +5745,7 @@ do
 		local zone = ZoneCommand.getZoneByName(savedData.lastMission.zoneName)
 
 		local homePos = trigger.misc.getZone(savedData.homeName).point
-		mist.teleportToPoint(getDefaultPos(savedData, true))
+		RetUtils.teleportGroup(getDefaultPos(savedData, true))
 		DependencyManager.get("GroupMonitor"):registerGroup(product, zone, self, savedData)
 		
 		timer.scheduleFunction(function(param)
@@ -5777,7 +5788,7 @@ do
 				teleportToPos(product.name, {x=og.x, z=og.y})
 				env.info("ZoneCommand - activateBaiMission teleporting to OG pos")
 			else
-				mist.respawnGroup(product.name, true)
+				RetUtils.respawnGroup(product.name)
 				env.info("ZoneCommand - activateBaiMission fallback to respawnGroup")
 			end
 
@@ -5841,7 +5852,7 @@ do
 
 				for _,v2 in pairs(v.neighbours) do
 					if v2.name~=self.name and (v2.side == 0 or v2.side==product.side) then
-						local dist = mist.utils.get2DDist(self.zone.point, v2.zone.point)
+						local dist = RetUtils.get2DDist(self.zone.point, v2.zone.point)
 						if dist < 50000 then
 							table.insert(tgtzones, v2)
 						end
@@ -5876,7 +5887,7 @@ do
 					teleportToPos(product.name, {x=og.x, z=og.y})
 					env.info("ZoneCommand - activateAirSupplyMission teleporting to OG pos")
 				else
-					mist.respawnGroup(product.name, true)
+					RetUtils.respawnGroup(product.name)
 					env.info("ZoneCommand - activateAirSupplyMission fallback to respawnGroup")
 				end
 
@@ -6000,7 +6011,7 @@ do
 						teleportToPos(product.name, {x=og.x, z=og.y})
 						env.info("ZoneCommand - activateSupplyConvoyMission teleporting to OG pos")
 					else
-						mist.respawnGroup(product.name, true)
+						RetUtils.respawnGroup(product.name)
 						env.info("ZoneCommand - activateSupplyConvoyMission fallback to respawnGroup")
 					end
 
@@ -6062,7 +6073,7 @@ do
 					teleportToPos(product.name, {x=og.x, z=og.y})
 					env.info("ZoneCommand - activateAssaultMission teleporting to OG pos")
 				else
-					mist.respawnGroup(product.name, true)
+					RetUtils.respawnGroup(product.name)
 					env.info("ZoneCommand - activateAssaultMission fallback to respawnGroup")
 				end
 
@@ -6109,7 +6120,7 @@ do
 			teleportToPos(product.name, {x=og.x, z=og.y})
 			env.info("ZoneCommand - activateAwacsMission teleporting to OG pos")
 		else
-			mist.respawnGroup(product.name, true)
+			RetUtils.respawnGroup(product.name)
 			env.info("ZoneCommand - activateAwacsMission fallback to respawnGroup")
 		end
 
@@ -6160,7 +6171,7 @@ do
 			teleportToPos(product.name, {x=og.x, z=og.y})
 			env.info("ZoneCommand - activateTankerMission teleporting to OG pos")
 		else
-			mist.respawnGroup(product.name, true)
+			RetUtils.respawnGroup(product.name)
 			env.info("ZoneCommand - activateTankerMission fallback to respawnGroup")
 		end
 
@@ -6189,7 +6200,7 @@ do
 		if target.name == self.name then return false end
 		if not target.distToFront or target.distToFront > 1 then return false end
 		if target.side ~= product.side and target.side ~= 0 then return false end
-		local dist = mist.utils.get2DDist(self.zone.point, target.zone.point)
+		local dist = RetUtils.get2DDist(self.zone.point, target.zone.point)
 		if dist > 150000 then return false end
 		
 		return true
@@ -6218,7 +6229,7 @@ do
 			teleportToPos(product.name, {x=og.x, z=og.y})
 			env.info("ZoneCommand - activatePatrolMission teleporting to OG pos")
 		else
-			mist.respawnGroup(product.name, true)
+			RetUtils.respawnGroup(product.name)
 			env.info("ZoneCommand - activatePatrolMission fallback to respawnGroup")
 		end
 
@@ -6416,7 +6427,7 @@ do
 			teleportToPos(product.name, {x=og.x, z=og.y})
 			env.info("ZoneCommand - activateSeadMission teleporting to OG pos")
 		else
-			mist.respawnGroup(product.name, true)
+			RetUtils.respawnGroup(product.name)
 			env.info("ZoneCommand - activateSeadMission fallback to respawnGroup")
 		end
 
@@ -6472,7 +6483,7 @@ do
 			teleportToPos(product.name, {x=og.x, z=og.y})
 			env.info("ZoneCommand - activateStrikeMission teleporting to OG pos")
 		else
-			mist.respawnGroup(product.name, true)
+			RetUtils.respawnGroup(product.name)
 			env.info("ZoneCommand - activateStrikeMission fallback to respawnGroup")
 		end
 
@@ -6534,7 +6545,7 @@ do
 			teleportToPos(product.name, {x=og.x, z=og.y})
 			env.info("ZoneCommand - activateCasMission teleporting to OG pos")
 		else
-			mist.respawnGroup(product.name, true)
+			RetUtils.respawnGroup(product.name)
 			env.info("ZoneCommand - activateCasMission fallback to respawnGroup")
 		end
 
@@ -6675,7 +6686,7 @@ do
 				--set dist to closest enemy
 				for name2,zone2 in pairs(zones) do
 					if zone.side ~= zone2.side then
-						local dist = mist.utils.get2DDist(zone.zone.point, zone2.zone.point)
+						local dist = RetUtils.get2DDist(zone.zone.point, zone2.zone.point)
 						if not zone.closestEnemyDist or dist < zone.closestEnemyDist then
 							zone.closestEnemyDist = dist
 						end
@@ -7900,7 +7911,7 @@ do
                         percent_visible = 0
                     }
                     
-                    currentParameters.distance = mist.utils.get2DDist(pun:getPoint(), closestZone.zone.point)
+                    currentParameters.distance = RetUtils.get2DDist(pun:getPoint(), closestZone.zone.point)
 
                     local unitPos = pun:getPosition()
                     local unitheading = math.deg(math.atan2(unitPos.x.z, unitPos.x.x))
@@ -8637,7 +8648,7 @@ do
                             route = {}
                         }
                 
-                        mist.teleportToPoint(vars)
+                        RetUtils.teleportGroup(vars)
 
                         timer.scheduleFunction(function(param, time)
                             param:setupRadios()
@@ -9131,7 +9142,7 @@ do
     function Spawner.getUnit(unitType, name, pos, skill, minDist, maxDist, surfaceTypes, zone)
         local nudgedPos = nil
 		for i=1,500,1 do
-            nudgedPos = mist.getRandPointInCircle(pos, maxDist, minDist)
+            nudgedPos = RetUtils.getRandPointInCircle(pos, maxDist, minDist)
            
             if zone then
                 if zone:isInside(nudgedPos) and surfaceTypes[land.getSurfaceType(nudgedPos)] then
@@ -9173,7 +9184,7 @@ do
         if data.dataCategory == TemplateDB.type.static then
             if not surfaceTypes[land.getSurfaceType(pos)] then
                 for i=1,500,1 do
-                    pos = mist.getRandPointInCircle(pos, maxDist)
+                    pos = RetUtils.getRandPointInCircle(pos, maxDist)
 
                     if zone then
                         if zone:isInside(pos) and surfaceTypes[land.getSurfaceType(pos)] then
@@ -9688,9 +9699,9 @@ do
 				toprint = toprint..'Lasing '..tgttype..' at '..self.tgtzone.name..'\nCode: '..self.laserCode..'\n'
 				local lat,lon,alt = coord.LOtoLL(pnt)
 				local mgrs = coord.LLtoMGRS(coord.LOtoLL(pnt))
-				toprint = toprint..'\nDDM:  '.. mist.tostringLL(lat,lon,3)
-				toprint = toprint..'\nDMS:  '.. mist.tostringLL(lat,lon,2,true)
-				toprint = toprint..'\nMGRS: '.. mist.tostringMGRS(mgrs, 5)
+				toprint = toprint..'\nDDM:  '.. UTILS.tostringLL(lat,lon,3)
+				toprint = toprint..'\nDMS:  '.. UTILS.tostringLL(lat,lon,2,true)
+				toprint = toprint..'\nMGRS: '.. UTILS.tostringMGRS(mgrs, 5)
 				toprint = toprint..'\n\nAlt: '..math.floor(alt)..'m'..' | '..math.floor(alt*3.280839895)..'ft'
 			else
 				makeitlast = false
@@ -9825,7 +9836,7 @@ do
 		vars.gpName = self.name
 		vars.action = 'respawn' 
 		vars.point = {x=p.x, y=5000, z = p.z}
-		mist.teleportToPoint(vars)
+		RetUtils.teleportGroup(vars)
 		
 		timer.scheduleFunction(function(param,time)
 			param.context:setOrbit(param.target, param.point)
@@ -9992,12 +10003,12 @@ do
         obj.radio = radioConfig.radio
 
         obj.spawns = {}
-		for i,v in pairs(mist.DBs.groupsByName) do
-			if v.units[1].skill == 'Client' then
+		for i,v in pairs(_DATABASE.Templates.Groups) do
+			if v.Template.units[1] and v.Template.units[1].skill == 'Client' then
 				local pos3d = {
-					x = v.units[1].point.x,
+					x = v.Template.units[1].x,
 					y = 0,
-					z = v.units[1].point.y
+					z = v.Template.units[1].y
 				}
 				
 				if Utils.isInCircle(pos3d, unit:getPoint(), obj.range)then
@@ -10243,7 +10254,7 @@ do
 			if self.navigation.currentWaypoint then
 				local tgzn = self.navigation.waypoints[self.navigation.currentWaypoint]
 				local point = CustomZone:getByName(tgzn).point
-				dist = mist.utils.get2DDist(unit:getPoint(), point)
+				dist = RetUtils.get2DDist(unit:getPoint(), point)
 			end
 
 			if dist<2000 then
@@ -10268,7 +10279,7 @@ do
 			if self.navigation.currentWaypoint then
 				local tgzn = self.navigation.waypoints[self.navigation.currentWaypoint]
 				local point = CustomZone:getByName(tgzn).point
-				dist = mist.utils.get2DDist(unit:getPoint(), point)
+				dist = RetUtils.get2DDist(unit:getPoint(), point)
 			end
 
 			if dist<2000 then
@@ -10433,12 +10444,12 @@ do
 		data.target = target
 
 		if saveData then
-			mist.teleportToPoint(getDefaultPos(saveData))
+			RetUtils.teleportGroup(getDefaultPos(saveData))
 			data.state = saveData.state
 			data.lastStateTime = timer.getAbsTime() - saveData.lastStateDuration
 			data.returning = saveData.returning
 		else
-			mist.respawnGroup(data.name, true)
+			RetUtils.respawnGroup(data.name)
 		end
 
 		if data.type == CarrierCommand.supportTypes.strike then
@@ -10745,7 +10756,7 @@ do
 		for i,v in pairs(CarrierCommand.allCarriers) do
             local carrier = Unit.getByName(v.name)
             if carrier then
-                local d = mist.utils.get2DDist(carrier:getPoint(), point)
+                local d = RetUtils.get2DDist(carrier:getPoint(), point)
                 if d < minDist then
                     minDist = d
                     closest = v
@@ -11121,7 +11132,7 @@ do
             for name, unit in pairs(self.mission.players) do
                 if unit and unit:isExist() then
                     local tgtUnit = gr:getUnit(1)
-                    local dist = mist.utils.get2DDist(unit:getPoint(), tgtUnit:getPoint())
+                    local dist = RetUtils.get2DDist(unit:getPoint(), tgtUnit:getPoint())
                     
                     local m = '\n     '..name..': Distance: '
                     m = m..string.format('%.2f',dist/1000)..'km'
@@ -11148,7 +11159,7 @@ do
                     for _, unit in pairs(self.mission.players) do
                         if unit and unit:isExist() then
                             local tgtUnit = gr:getUnit(1)
-                            local dist = mist.utils.get2DDist(unit:getPoint(), tgtUnit:getPoint())
+                            local dist = RetUtils.get2DDist(unit:getPoint(), tgtUnit:getPoint())
                             local dstkm = string.format('%.2f',dist/1000)
                             local dstnm = string.format('%.2f',dist/1852)
 
@@ -11224,9 +11235,9 @@ do
         if point then
             local lat,lon,alt = coord.LOtoLL(point)
             local mgrs = coord.LLtoMGRS(coord.LOtoLL(point))
-            msg = msg..'\n DDM:  '.. mist.tostringLL(lat,lon,3)
-            msg = msg..'\n DMS:  '.. mist.tostringLL(lat,lon,2,true)
-            msg = msg..'\n MGRS: '.. mist.tostringMGRS(mgrs, 5)
+            msg = msg..'\n DDM:  '.. UTILS.tostringLL(lat,lon,3)
+            msg = msg..'\n DMS:  '.. UTILS.tostringLL(lat,lon,2,true)
+            msg = msg..'\n MGRS: '.. UTILS.tostringMGRS(mgrs, 5)
             msg = msg..'\n Altitude: '..math.floor(alt)..'m'..' | '..math.floor(alt*3.280839895)..'ft'
         end
 
@@ -11410,9 +11421,9 @@ do
             local grunit = gr:getUnit(1)
             local lat,lon,alt = coord.LOtoLL(grunit:getPoint())
             local mgrs = coord.LLtoMGRS(coord.LOtoLL(grunit:getPoint()))
-            msg = msg..'\n DDM:  '.. mist.tostringLL(lat,lon,3)
-            msg = msg..'\n DMS:  '.. mist.tostringLL(lat,lon,2,true)
-            msg = msg..'\n MGRS: '.. mist.tostringMGRS(mgrs, 5)
+            msg = msg..'\n DDM:  '.. UTILS.tostringLL(lat,lon,3)
+            msg = msg..'\n DMS:  '.. UTILS.tostringLL(lat,lon,2,true)
+            msg = msg..'\n MGRS: '.. UTILS.tostringMGRS(mgrs, 5)
         end
         
         local prg = math.floor(((self.param.maxAmount - self.param.amount)/self.param.maxAmount)*100)
@@ -11433,7 +11444,7 @@ do
             if self.param.target.state == 'atdestination' or self.param.target.state == 'siege' then
                 for name, unit in pairs(self.mission.players) do
                     if unit and unit:isExist() then
-                        local dist = mist.utils.get3DDist(unit:getPoint(), grunit:getPoint())
+                        local dist = UTILS.VecDist3D(unit:getPoint(), grunit:getPoint())
                         if dist < self.param.proxDist then
                             self.isComplete = true
                             break
@@ -11454,7 +11465,7 @@ do
                 local shouldUpdateMsg = (timer.getAbsTime() - self.param.lastUpdate) > updateFrequency
                 for name, unit in pairs(self.mission.players) do
                     if unit and unit:isExist() then
-                        local dist = mist.utils.get3DDist(unit:getPoint(), grunit:getPoint())
+                        local dist = UTILS.VecDist3D(unit:getPoint(), grunit:getPoint())
                         if dist < self.param.proxDist then
                             self.param.amount = self.param.amount - (1/plycount)
 
@@ -11582,7 +11593,7 @@ do
                             end
                             
                             local pos = u:getPoint()
-                            local dist = mist.utils.get2DDist(point, pos)
+                            local dist = RetUtils.get2DDist(point, pos)
                             if dist > range then
                                 allInside = false
                                 break
@@ -11831,9 +11842,9 @@ do
 
                 local lat,lon,alt = coord.LOtoLL(point)
                 local mgrs = coord.LLtoMGRS(coord.LOtoLL(point))
-                msg = msg..'\n DDM:  '.. mist.tostringLL(lat,lon,3)
-                msg = msg..'\n DMS:  '.. mist.tostringLL(lat,lon,2,true)
-                msg = msg..'\n MGRS: '.. mist.tostringMGRS(mgrs, 5)
+                msg = msg..'\n DDM:  '.. UTILS.tostringLL(lat,lon,3)
+                msg = msg..'\n DMS:  '.. UTILS.tostringLL(lat,lon,2,true)
+                msg = msg..'\n MGRS: '.. UTILS.tostringMGRS(mgrs, 5)
                 msg = msg..'\n Altitude: '..math.floor(alt)..'m'..' | '..math.floor(alt*3.280839895)..'ft'
             end
         end
@@ -11865,7 +11876,7 @@ do
                     if unit and unit:isExist() then
                         local gr = Group.getByName(self.param.target.name)
                         local un = gr:getUnit(1)
-                        local dist = mist.utils.get3DDist(unit:getPoint(), un:getPoint())
+                        local dist = UTILS.VecDist3D(unit:getPoint(), un:getPoint())
                         local m = 'Distance: '
                         if dist>1000 then
                             local dstkm = string.format('%.2f',dist/1000)
@@ -11927,9 +11938,9 @@ do
 
                 local lat,lon,alt = coord.LOtoLL(point)
                 local mgrs = coord.LLtoMGRS(coord.LOtoLL(point))
-                msg = msg..'\n DDM:  '.. mist.tostringLL(lat,lon,3)
-                msg = msg..'\n DMS:  '.. mist.tostringLL(lat,lon,2,true)
-                msg = msg..'\n MGRS: '.. mist.tostringMGRS(mgrs, 5)
+                msg = msg..'\n DDM:  '.. UTILS.tostringLL(lat,lon,3)
+                msg = msg..'\n DMS:  '.. UTILS.tostringLL(lat,lon,2,true)
+                msg = msg..'\n MGRS: '.. UTILS.tostringMGRS(mgrs, 5)
                 msg = msg..'\n Altitude: '..math.floor(alt)..'m'..' | '..math.floor(alt*3.280839895)..'ft'
             end
         end
@@ -11960,7 +11971,7 @@ do
                         if gr and gr:getSize() > 0 then
                             local un = gr:getUnit(1)
                             if un then
-                                local dist = mist.utils.get3DDist(unit:getPoint(), un:getPoint())
+                                local dist = UTILS.VecDist3D(unit:getPoint(), un:getPoint())
                                 local m = 'Distance: '
                                 if dist>1000 then
                                     local dstkm = string.format('%.2f',dist/1000)
@@ -12106,7 +12117,7 @@ do
             local shouldUpdateMsg = (timer.getAbsTime() - self.param.lastUpdate) > updateFrequency
             for name, unit in pairs(self.mission.players) do
                 if unit and unit:isExist() and Utils.isInAir(unit) then
-                    local dist = mist.utils.get2DDist(unit:getPoint(), self.param.target.zone.point)
+                    local dist = RetUtils.get2DDist(unit:getPoint(), self.param.target.zone.point)
                     if dist < self.param.range then
                         self.param.amount = self.param.amount - (1/plycount)
 
@@ -13934,7 +13945,7 @@ do
 
             description = description..'   Rescue '..tgt.name..nearzone..' and deliver them to a friendly zone'
             --local mgrs = coord.LLtoMGRS(coord.LOtoLL(tgt.pilot:getUnit(1):getPoint()))
-            --local grid = mist.tostringMGRS(mgrs, 2):gsub(' ','')
+            --local grid = UTILS.tostringMGRS(mgrs, 2):gsub(' ','')
             --description = description..' ['..grid..']'
         end
         self.description = self.description..description
@@ -14001,7 +14012,7 @@ do
                         nearzone = ' near '..closest.name..''
                     end
                     --local mgrs = coord.LLtoMGRS(coord.LOtoLL(un:getPoint()))
-                    --local grid = mist.tostringMGRS(mgrs, 2):gsub(' ','')
+                    --local grid = UTILS.tostringMGRS(mgrs, 2):gsub(' ','')
                     --description = description..' ['..grid..']'
                 end
 
@@ -15161,7 +15172,7 @@ do
             if v.state == 'extractReady' and v.data.side == onside then
                 local gr = Group.getByName(v.name)
                 if gr and gr:getSize()>0 then
-                    local dist = mist.utils.get2DDist(sourcePoint, gr:getUnit(1):getPoint())
+                    local dist = RetUtils.get2DDist(sourcePoint, gr:getUnit(1):getPoint())
                     if dist<minDist then
                         minDist = dist
                         squad = v
@@ -15281,7 +15292,7 @@ do
                                 if tgt.visible and tgt.object then
                                     if tgt.object.isExist and tgt.object:isExist() and tgt.object.getCoalition and tgt.object:getCoalition()~=gr:getCoalition() and 
                                     Object.getCategory(tgt.object) == 1 then
-                                        local dist = mist.utils.get3DDist(gr:getUnit(1):getPoint(), tgt.object:getPoint())
+                                        local dist = UTILS.VecDist3D(gr:getUnit(1):getPoint(), tgt.object:getPoint())
                                         if dist < 100 then
                                             isTargetClose = true
                                             break
@@ -15461,7 +15472,7 @@ do
 
         for i,v in pairs(self.activePilots) do
             if v.pilot:isExist() and v.pilot:getSize()>0 and v.pilot:getUnit(1):isExist() and v.remainingTime > 0 then
-                local dist = mist.utils.get2DDist(toPosition, v.pilot:getUnit(1):getPoint())
+                local dist = RetUtils.get2DDist(toPosition, v.pilot:getUnit(1):getPoint())
                 if dist<minDist then
                     minDist = dist
                     data = v
@@ -15691,7 +15702,7 @@ do
                             for _,dt in pairs(dect) do
                                 if dt:isExist() then
                                     local tgtPnt = dt:getPoint()
-                                    local dist = mist.utils.get2DDist(data.unit:getPoint(), tgtPnt)
+                                    local dist = RetUtils.get2DDist(data.unit:getPoint(), tgtPnt)
                                     if dist <= wr then
                                         local brg = math.floor(Utils.getBearing(data.unit:getPoint(), tgtPnt))
 

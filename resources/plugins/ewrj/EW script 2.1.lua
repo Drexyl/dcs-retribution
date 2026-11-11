@@ -61,7 +61,7 @@ ewrj_options = {
 
 
 ------------------------ SOME TRIGONOMETRIC FUNCTIONS AND STUFF
-getMag = function(vec) -- from mist
+getMag = function(vec)
     return (vec.x^2 + vec.y^2 + vec.z^2)^0.5
 end
     
@@ -212,7 +212,7 @@ function check(jammer, samunit)
             if ewrj_options.DEBUG_OFFENSIVE then
                 env.info("[EW DEBUG - OFFENSIVE] "..samunit.." PEEKING")
             end
-            mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 0.8)
+            RetUtils.newTimer(check, jammer, samunit):Start(0.8)
             return
         end
 
@@ -227,7 +227,7 @@ function check(jammer, samunit)
                 if ewrj_options.DEBUG_OFFENSIVE then
                     env.info("[EW DEBUG - OFFENSIVE] "..samunit.." missed peek opportunity — rejammed")
                 end
-                mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 3)
+                RetUtils.newTimer(check, jammer, samunit):Start(3)
                 return
             end
         end
@@ -298,7 +298,7 @@ function check(jammer, samunit)
                 if ewrj_options.DEBUG then
                     env.info("[EW DEBUG] check(): no other jammers - restoring "..tostring(samunit))
                 end
-                mist.scheduleFunction(samON, {samunit}, timer.getTime() + math.random(25,40))
+                RetUtils.newTimer(samON, samunit):Start(math.random(25,40))
             end
             return
         end
@@ -309,7 +309,7 @@ function check(jammer, samunit)
             if ewrj_options.DEBUG then
                 env.info("[EW DEBUG] check(): target missing or destroyed for SAM "..tostring(samunit))
             end
-            mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 0.8)
+            RetUtils.newTimer(check, jammer, samunit):Start(0.8)
             return
         end
 
@@ -335,7 +335,7 @@ function check(jammer, samunit)
                 if ewrj_options.DEBUG then
                     env.info("[EW DEBUG] check(): LOS lost and no other jammers - restoring "..tostring(samunit))
                 end
-                mist.scheduleFunction(samON, {samunit}, timer.getTime() + math.random(25,40))
+                RetUtils.newTimer(samON, samunit):Start(math.random(25,40))
             end
             return
         end
@@ -348,7 +348,7 @@ function check(jammer, samunit)
         if isMissileTarget then
             -- Only allow a peek attempt ~30% of the time
             if math.random() > 0.3 then
-                mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 5)
+                RetUtils.newTimer(check, jammer, samunit):Start(5)
                 return
             end
         end
@@ -381,7 +381,7 @@ function check(jammer, samunit)
             if ewrj_options.DEBUG then
                 env.info("[EW DEBUG] check(): invalid distances for SAM "..tostring(samunit).." (distSamJammer="..tostring(distSamJammer)..", distSamTarget="..tostring(distSamTarget)..")")
             end
-            mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 5)
+            RetUtils.newTimer(check, jammer, samunit):Start(5)
             return
         end
 
@@ -450,7 +450,7 @@ function check(jammer, samunit)
             if ewrj_options.DEBUG_OFFENSIVE then
                 env.info("[EW DEBUG - OFFENSIVE] "..samunit.." peeking — not yet committed to fire")
             end
-            mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 0.8)
+            RetUtils.newTimer(check, jammer, samunit):Start(0.8)
             return
         end
 
@@ -476,7 +476,7 @@ function check(jammer, samunit)
                 if ewrj_options.DEBUG_OFFENSIVE then
                     env.info("[EW DEBUG - OFFENSIVE] "..samunit.." panic-peek vs missile — no fire")
                 end
-                mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 5)
+                RetUtils.newTimer(check, jammer, samunit):Start(5)
                 return
             end
 
@@ -492,11 +492,9 @@ function check(jammer, samunit)
         -------------------------
         ---- LOBE Parameters ----
         -------------------------
-        local SamPos = mist.utils.makeVec2(UnitObject:getPosition().p) -- tenemos un vector x e y
-        local JammerPos = mist.utils.makeVec2(jammerobject:getPosition().p)        
-        local TargetPos = mist.utils.makeVec2(targetobject:getPosition().p)    
-        local AngleSamJammer = mist.utils.toDegree(mist.utils.getDir(mist.vec.sub(mist.utils.makeVec3GL(JammerPos),mist.utils.makeVec3GL(SamPos))))
-        local AngleSamTarget = mist.utils.toDegree(mist.utils.getDir(mist.vec.sub(mist.utils.makeVec3GL(TargetPos),mist.utils.makeVec3GL(SamPos))))    
+        local SamPos = UnitObject:getPosition().p -- horizontal bearings below are grid degrees, 0-360
+        local AngleSamJammer = UTILS.HdgTo(SamPos, jammerobject:getPosition().p)
+        local AngleSamTarget = UTILS.HdgTo(SamPos, targetobject:getPosition().p)
         local offsetJamTar = smallestAngleDiff(AngleSamJammer, AngleSamTarget )
         local offsetJamSam = smallestAngleDiff(AngleSamJammer, 180 )
         local TargetandOffsetJamSam = smallestAngleDiff(AngleSamTarget, offsetJamSam )*2
@@ -507,13 +505,16 @@ function check(jammer, samunit)
         local anglecondition = 0 -- Decouple Angle gating from distance.
 
         --    PITCH and BANK
-        local bankr = mist.utils.toDegree(mist.getRoll(jammerobject))
+        local jammerOrientation = jammerobject:getPosition()
+        -- roll magnitude: angle between the wing axis and the horizontal vector perpendicular to the nose
+        local jammerLevelWing = UTILS.VecCross(jammerOrientation.x, {x = 0, y = 1, z = 0})
+        local bankr = UTILS.ToDegree(math.acos(UTILS.VecDot(jammerLevelWing, jammerOrientation.z) / (UTILS.VecNorm(jammerLevelWing) * UTILS.VecNorm(jammerOrientation.z))))
         if bankr < 0 then
             bankr = -bankr
         end
         local bank = bankr - 15
 
-        local pitchr = mist.utils.toDegree(mist.getPitch(jammerobject))
+        local pitchr = UTILS.ToDegree(math.asin(jammerOrientation.x.y))
         if pitchr < 0 then
             pitchr = -pitchr
         end
@@ -526,14 +527,14 @@ function check(jammer, samunit)
         local cateto = _height - s_height
         local samunitposition = UnitObject:getPosition().p
         local jammerposition = jammerobject:getPosition().p
-        local _2DDistSamJammer = mist.utils.get2DDist(samunitposition, jammerposition)
+        local _2DDistSamJammer = RetUtils.get2DDist(samunitposition, jammerposition)
 
         local anglesamjam = 0
         if _2DDistSamJammer ~= 0 then
             local ratio = cateto/_2DDistSamJammer
             if ratio > 1 then ratio = 1 end
             if ratio < -1 then ratio = -1 end
-            anglesamjam = mist.utils.toDegree(math.asin(ratio))
+            anglesamjam = UTILS.ToDegree(math.asin(ratio))
         end
 
         ------------------------------------------------------------------------
@@ -575,7 +576,7 @@ function check(jammer, samunit)
             if ewrj_options.DEBUG_OFFENSIVE then
                 env.info("[EW DEBUG - OFFENSIVE] "..samunit.." JAMMED by: "..jammer.." Target: "..targetname)
             end
-            mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 5)
+            RetUtils.newTimer(check, jammer, samunit):Start(5)
 
         elseif ((conditiondist < 40.5) and (conditiondist > 13.33)) 
             and (prob <= probsector2) 
@@ -594,7 +595,7 @@ function check(jammer, samunit)
             if ewrj_options.DEBUG_OFFENSIVE then
                 env.info("[EW DEBUG - OFFENSIVE] "..samunit.." JAMMED (mid)")
             end
-            mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 5)
+            RetUtils.newTimer(check, jammer, samunit):Start(5)
         elseif (conditiondist < 13.33) 
             and (prob <= probsector1)
             and (anglecondition < TargetandOffsetJamSam)
@@ -612,14 +613,14 @@ function check(jammer, samunit)
             if ewrj_options.DEBUG_OFFENSIVE then
                 env.info("[EW DEBUG - OFFENSIVE] "..samunit.." JAMMED (close)")
             end
-            mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 5)
+            RetUtils.newTimer(check, jammer, samunit):Start(5)
         else
-            mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 5)
+            RetUtils.newTimer(check, jammer, samunit):Start(5)
         end
 
     else
         -- no target: keep polling so jamming can resume when target reappears
-        mist.scheduleFunction(check, {jammer, samunit}, timer.getTime() + 5)
+        RetUtils.newTimer(check, jammer, samunit):Start(5)
         return
     end
 end
@@ -693,7 +694,7 @@ function samOFF(groupsam)
         trigger.action.outText(groupsam.." SAM SWITCHING OFF", 5)
         env.info("[EW DEBUG] SAM has switched OFF: " .. groupsam)
     end
-    -- mist.scheduleFunction(samON, {groupsam}, timer.getTime()+ math.random(25,40))
+    -- RetUtils.newTimer(samON, groupsam):Start(math.random(25,40))
 end
 
 function samPEEK(groupsam)
@@ -757,12 +758,12 @@ end
 radarList = {}
 
 function getRadars()
-    local redUnits = mist.makeUnitTable({'[red][vehicle]','[blue][vehicle]','[red][ship]','[blue][ship]'})
+    local redUnits = RetUtils.getUnitNames({coalition.side.RED, coalition.side.BLUE}, {Group.Category.GROUND, Group.Category.SHIP})
         if ewrj_options.DEBUG_ADVANCED then
-            trigger.action.outText(mist.utils.tableShow(redUnits),15)
+            trigger.action.outText(UTILS.TableShow(redUnits),15)
         end
         for i, unitName in pairs (redUnits) do
-        if type(i) == "number" then  -- makeUnitTable also has a ["processed"] = time index which does not represent a unit
+        if type(i) == "number" then
         local samUnit = Unit.getByName(unitName)
 
             if samUnit and Unit.isExist(samUnit) then
@@ -810,7 +811,7 @@ function startEWjamm(jammer)
     end
     radarList = validRadarList  -- update the global list safely
     if ewrj_options.DEBUG_ADVANCED then
-        trigger.action.outText(mist.utils.tableShow(radarList),20)
+        trigger.action.outText(UTILS.TableShow(radarList),20)
     end
 
     --------------------------------------
@@ -872,7 +873,7 @@ function stopEWjamm(jammer)
         for _, samName in pairs(radarList) do
             local samUnit = Unit.getByName(samName)
             if samUnit and samUnit:isExist() then
-                mist.scheduleFunction(samON, {samName}, timer.getTime()+ math.random(5,15))
+                RetUtils.newTimer(samON, samName):Start(math.random(5,15))
             end
         end
     else
@@ -1053,7 +1054,7 @@ function EWJD(jammer)
     local numActive = 0
     local uid = 1
     local idNum = 1
-    local function simpleEvent(f) -- from mist
+    local function simpleEvent(f)
         local handler = {}
         idNum = idNum + 1
         handler.id = idNum
@@ -1214,7 +1215,7 @@ local function checkMis(mis)
             if mis.lostTrack then
                 nextDelay = math.random(6,10)
             else
-                local relSpeed = getMag(mist.vec.sub(misVel, targVel))
+                local relSpeed = getMag(UTILS.VecSubstract(misVel, targVel))
                 if relSpeed < 50 then relSpeed = 50 end
                 nextDelay = math.min(10, dist / relSpeed)
             end

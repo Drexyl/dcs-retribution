@@ -128,7 +128,7 @@ if dcsRetribution then
                     return false
                 end
                 -- less than 5 cm/s so landed, BUT AI can hold a perfect hover so ignore AI
-                if mist.vec.mag(_heli:getVelocity()) < 0.05 and _heli:getPlayerName() ~= nil then
+                if UTILS.VecNorm(_heli:getVelocity()) < 0.05 and _heli:getPlayerName() ~= nil then
                     return false
                 end
                 return true

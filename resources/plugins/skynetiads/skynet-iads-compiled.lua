@@ -1,4 +1,27 @@
 env.info("--- SKYNET VERSION: baron-branch | BUILD TIME: 16.05.2023 0646Z ---")
+-- Scheduling runs on MOOSE TIMER objects (native DCS timers). The *TaskID / harm*ID
+-- fields hold the TIMER, or nil when nothing is scheduled.
+local function skynetStopTimer(scheduledTimer)
+	if scheduledTimer then
+		scheduledTimer:Stop()
+	end
+end
+
+-- Largest terrain height difference (metres) within searchRadius of a Vec2 point,
+-- sampled every 30 degrees on the outer ring and at half radius.
+local function skynetTerrainHeightDiff(point, searchRadius)
+	local minHeight = land.getHeight(point)
+	local maxHeight = minHeight
+	for angle = 0, 330, 30 do
+		local sinA, cosA = math.sin(math.rad(angle)), math.cos(math.rad(angle))
+		for _, radius in ipairs({searchRadius, searchRadius / 2}) do
+			local height = land.getHeight({x = point.x + sinA * radius, y = point.y + cosA * radius})
+			if height > maxHeight then maxHeight = height end
+			if height < minHeight then minHeight = height end
+		end
+	end
+	return maxHeight - minHeight
+end
 do
 --this file contains the required units per sam type
 samTypesDB = {
@@ -930,7 +953,7 @@ function SkynetIADSLogger:printEarlyWarningRadarStatus()
 		for j = 1, #detectedTargets do
 			local contact = detectedTargets[j]
 			if firstRadar ~= nil and firstRadar:isExist() then
-				local distance = mist.utils.round(mist.utils.metersToNM(ewRadar:getDistanceInMetersToContact(firstRadar:getDCSRepresentation(), contact:getPosition().p)), 2)
+				local distance = UTILS.Round(UTILS.MetersToNM(ewRadar:getDistanceInMetersToContact(firstRadar:getDCSRepresentation(), contact:getPosition().p)), 2)
 				self:printOutputToLog("CONTACT: "..contact:getName().." | TYPE: "..contact:getTypeName().." | DISTANCE NM: "..distance)
 			end
 		end
@@ -1021,7 +1044,7 @@ function SkynetIADSLogger:printSAMSiteStatus()
 		for j = 1, #detectedTargets do
 			local contact = detectedTargets[j]
 			if firstRadar ~= nil and firstRadar:isExist() then
-				local distance = mist.utils.round(mist.utils.metersToNM(samSite:getDistanceInMetersToContact(firstRadar:getDCSRepresentation(), contact:getPosition().p)), 2)
+				local distance = UTILS.Round(UTILS.MetersToNM(samSite:getDistanceInMetersToContact(firstRadar:getDCSRepresentation(), contact:getPosition().p)), 2)
 				self:printOutputToLog("CONTACT: "..contact:getName().." | TYPE: "..contact:getTypeName().." | DISTANCE NM: "..distance)
 			end
 		end
@@ -1185,7 +1208,7 @@ function SkynetIADS:create(name)
 	iads.earlyWarningRadars = {}
 	iads.samSites = {}
 	iads.commandCenters = {}
-	iads.ewRadarScanMistTaskID = nil
+	iads.ewRadarScanTaskID = nil
 	iads.coalition = nil
 	iads.contacts = {}
 	iads.maxTargetAge = 32
@@ -1261,9 +1284,9 @@ end
 function SkynetIADS:addEarlyWarningRadarsByPrefix(prefix)
 	self:deactivateEarlyWarningRadars()
 	self.earlyWarningRadars = {}
-	for unitName, unit in pairs(mist.DBs.unitsByName) do
+	for unitName, _ in pairs(_DATABASE.UNITS) do
 		local pos = self:findSubString(unitName, prefix)
-		--somehow the MIST unit db contains StaticObject, we check to see we only add Units
+		--make sure the database entry is backed by a live DCS Unit
 		local unit = Unit.getByName(unitName)
 		if pos and pos == 1 and unit then
 			self:addEarlyWarningRadar(unitName)
@@ -1289,7 +1312,7 @@ function SkynetIADS:addEarlyWarningRadar(earlyWarningRadarUnitName)
 	ewRadar:setupElements()
 	ewRadar:setCachedTargetsMaxAge(self:getCachedTargetsMaxAge())
 	-- for performance improvement, if iads is not scanning no update coverage update needs to be done, will be executed once when iads activates
-	if self.ewRadarScanMistTaskID ~= nil then
+	if self.ewRadarScanTaskID ~= nil then
 		self:buildRadarCoverageForEarlyWarningRadar(ewRadar)
 	end
 	ewRadar:setActAsEW(true)
@@ -1326,10 +1349,10 @@ end
 function SkynetIADS:addSAMSitesByPrefix(prefix)
 	self:deativateSAMSites()
 	self.samSites = {}
-	for groupName, groupData in pairs(mist.DBs.groupsByName) do
+	for groupName, _ in pairs(_DATABASE.GROUPS) do
 		local pos = self:findSubString(groupName, prefix)
 		if pos and pos == 1 then
-			--mist returns groups, units and, StaticObjects
+			--make sure the database entry is backed by a live DCS Group
 			local dcsObject = Group.getByName(groupName)
 			if dcsObject then
 				self:addSAMSite(groupName)
@@ -1374,7 +1397,7 @@ function SkynetIADS:addSAMSite(samSiteName)
 			self:printOutputToLog("ADDED: "..samSite:getDescription())
 		end
 		-- for performance improvement, if iads is not scanning no update coverage update needs to be done, will be executed once when iads activates
-		if self.ewRadarScanMistTaskID ~= nil then
+		if self.ewRadarScanTaskID ~= nil then
 			self:buildRadarCoverageForSAMSite(samSite)
 		end
 		return samSite
@@ -1435,7 +1458,7 @@ function SkynetIADS:addCommandCenter(commandCenter)
 	local comCenter = SkynetIADSCommandCenter:create(commandCenter, self)
 	table.insert(self.commandCenters, comCenter)
 	-- when IADS is active the radars will be added to the new command center. If it not active this will happen when radar coverage is built
-	if self.ewRadarScanMistTaskID ~= nil then
+	if self.ewRadarScanTaskID ~= nil then
 		self:addRadarsToCommandCenters()
 	end
 	return comCenter
@@ -1507,15 +1530,22 @@ function SkynetIADS.evaluateContacts(self)
 
 	self:cleanAgedTargets()
 
-	for samName, samToTrigger in pairs(samSitesToTrigger) do
+	if next(samSitesToTrigger) ~= nil then
+		-- the DCS Radar only returns enemy aircraft, if that should change a coalition check will be required
+		-- currently every type of object in the air is handed of to the SAM site, including missiles
+		-- getDesc() is an expensive DCS call, so the airborne contacts are filtered once per cycle
+		-- instead of once per SAM site
+		local airborneContacts = {}
 		for j = 1, #self.contacts do
 			local contact = self.contacts[j]
-			-- the DCS Radar only returns enemy aircraft, if that should change a coalition check will be required
-			-- currently every type of object in the air is handed of to the SAM site, including missiles
-			local description = contact:getDesc()
-			local category = description.category
+			local category = contact:getDesc().category
 			if category and category ~= Unit.Category.GROUND_UNIT and category ~= Unit.Category.SHIP and category ~= Unit.Category.STRUCTURE then
-				samToTrigger:informOfContact(contact)
+				airborneContacts[#airborneContacts + 1] = contact
+			end
+		end
+		for samName, samToTrigger in pairs(samSitesToTrigger) do
+			for j = 1, #airborneContacts do
+				samToTrigger:informOfContact(airborneContacts[j])
 			end
 		end
 	end
@@ -1674,6 +1704,8 @@ function SkynetIADS:mergeContact(contact)
 				iadsContact:addAbstractRadarElementDetected(radar)
 			end
 			existingContact = true
+			--contact names are unique in self.contacts, no need to look any further
+			break
 		end
 	end
 	if existingContact == false then
@@ -1700,8 +1732,8 @@ end
 
 -- will start going through the Early Warning Radars and SAM sites to check what targets they have detected
 function SkynetIADS.activate(self)
-	mist.removeFunction(self.ewRadarScanMistTaskID)
-	self.ewRadarScanMistTaskID = mist.scheduleFunction(SkynetIADS.evaluateContacts, {self}, 1, self.contactUpdateInterval)
+	skynetStopTimer(self.ewRadarScanTaskID)
+	self.ewRadarScanTaskID = RetUtils.newTimer(SkynetIADS.evaluateContacts, self):Start(nil, self.contactUpdateInterval)
 	self:buildRadarCoverage()
 end
 
@@ -1711,8 +1743,8 @@ function SkynetIADS:setupSAMSitesAndThenActivate(setupTime)
 end
 
 function SkynetIADS:deactivate()
-	mist.removeFunction(self.ewRadarScanMistTaskID)
-	mist.removeFunction(self.samSetupMistTaskID)
+	skynetStopTimer(self.ewRadarScanTaskID)
+	self.ewRadarScanTaskID = nil
 	self:deativateSAMSites()
 	self:deactivateEarlyWarningRadars()
 	self:deactivateCommandCenters()
@@ -2211,8 +2243,8 @@ function SkynetIADSAbstractRadarElement:cleanUp()
 		local pointDefence = self.pointDefences[i]
 		pointDefence:cleanUp()
 	end
-	mist.removeFunction(self.harmScanID)
-	mist.removeFunction(self.harmSilenceID)
+	skynetStopTimer(self.harmScanID)
+	skynetStopTimer(self.harmSilenceID)
 	--call method from super class
 	self:removeEventHandlers()
 end
@@ -2788,7 +2820,7 @@ function SkynetIADSAbstractRadarElement:isInRadarDetectionRangeOf(abstractRadarE
 end
 
 function SkynetIADSAbstractRadarElement:getDistanceToUnit(unitPosA, unitPosB)
-	return mist.utils.round(mist.utils.get2DDist(unitPosA, unitPosB, 0))
+	return UTILS.Round(RetUtils.get2DDist(unitPosA, unitPosB, 0))
 end
 
 function SkynetIADSAbstractRadarElement:hasWorkingRadar()
@@ -2826,7 +2858,7 @@ end
 
 function SkynetIADSAbstractRadarElement:scanForHarms()
 	self:stopScanningForHARMs()
-	self.harmScanID = mist.scheduleFunction(SkynetIADSAbstractRadarElement.evaluateIfTargetsContainHARMs, {self}, 1, 2)
+	self.harmScanID = RetUtils.newTimer(SkynetIADSAbstractRadarElement.evaluateIfTargetsContainHARMs, self):Start(nil, 2)
 end
 
 function SkynetIADSAbstractRadarElement:isScanningForHARMs()
@@ -2838,7 +2870,7 @@ function SkynetIADSAbstractRadarElement:isDefendingHARM()
 end
 
 function SkynetIADSAbstractRadarElement:stopScanningForHARMs()
-	mist.removeFunction(self.harmScanID)
+	skynetStopTimer(self.harmScanID)
 	self.harmScanID = nil
 end
 
@@ -2855,7 +2887,8 @@ function SkynetIADSAbstractRadarElement:goSilentToEvadeHARM(timeToImpact)
 	if self.iads:getDebugSettings().harmDefence then
 		self.iads:printOutputToLog("HARM DEFENCE SHUTTING DOWN: "..self:getDCSName().." | FOR: "..self.harmShutdownTime.." seconds | TTI: "..timeToImpact)
 	end
-	self.harmSilenceID = mist.scheduleFunction(SkynetIADSAbstractRadarElement.finishHarmDefence, {self}, timer.getTime() + self.harmShutdownTime, 1)
+	skynetStopTimer(self.harmSilenceID)
+	self.harmSilenceID = RetUtils.newTimer(SkynetIADSAbstractRadarElement.finishHarmDefence, self):Start(self.harmShutdownTime)
 	self:goDark()
 
 	-- if we are a mobile SkynetIADSSamSite and harmShutdownTime exceeds mobileMaxEmissionTime, we might as well relocate right now
@@ -2874,7 +2907,7 @@ function SkynetIADSAbstractRadarElement:calculateHARMShutdownTime()
 end
 
 function SkynetIADSAbstractRadarElement.finishHarmDefence(self)
-	mist.removeFunction(self.harmSilenceID)
+	skynetStopTimer(self.harmSilenceID)
 	self.harmSilenceID = nil
 	self.harmShutdownTime = 0
 
@@ -2908,7 +2941,7 @@ end
 function SkynetIADSAbstractRadarElement:getSecondsToImpact(distanceNM, speedKT)
 	local tti = 0
 	if speedKT > 0 then
-		tti = mist.utils.round((distanceNM / speedKT) * 3600, 0)
+		tti = UTILS.Round((distanceNM / speedKT) * 3600, 0)
 		if tti < 0 then
 			tti = 0
 		end
@@ -2917,7 +2950,7 @@ function SkynetIADSAbstractRadarElement:getSecondsToImpact(distanceNM, speedKT)
 end
 
 function SkynetIADSAbstractRadarElement:getDistanceInMetersToContact(radarUnit, point)
-	return mist.utils.round(mist.utils.get3DDist(radarUnit:getPosition().p, point), 0)
+	return UTILS.Round(UTILS.VecDist3D(radarUnit:getPosition().p, point), 0)
 end
 
 function SkynetIADSAbstractRadarElement:calculateMinimalShutdownTimeInSeconds(timeToImpact)
@@ -2925,7 +2958,7 @@ function SkynetIADSAbstractRadarElement:calculateMinimalShutdownTimeInSeconds(ti
 end
 
 function SkynetIADSAbstractRadarElement:calculateMaximalShutdownTimeInSeconds(minShutdownTime)
-	return minShutdownTime + mist.random(1, self.maxHarmPresetShutdownTime)
+	return minShutdownTime + math.random(1, self.maxHarmPresetShutdownTime)
 end
 
 function SkynetIADSAbstractRadarElement:calculateImpactPoint(target, distanceInMeters)
@@ -2954,8 +2987,8 @@ function SkynetIADSAbstractRadarElement:informOfHARM(harmContact)
 	for j = 1, #radars do
 		local radar = radars[j]
 		if radar:isExist() then
-			local distanceNM =  mist.utils.metersToNM(self:getDistanceInMetersToContact(radar, harmContact:getPosition().p))
-			local harmToSAMHeading = mist.utils.toDegree(mist.utils.getHeadingPoints(harmContact:getPosition().p, radar:getPosition().p))
+			local distanceNM =  UTILS.MetersToNM(self:getDistanceInMetersToContact(radar, harmContact:getPosition().p))
+			local harmToSAMHeading = UTILS.HdgTo(harmContact:getPosition().p, radar:getPosition().p)
 			local harmToSAMAspect = self:calculateAspectInDegrees(harmContact:getMagneticHeading(), harmToSAMHeading)
 			local speedKT = harmContact:getGroundSpeedInKnots(0)
 			local secondsToImpact = self:getSecondsToImpact(distanceNM, speedKT)
@@ -2988,7 +3021,7 @@ function SkynetIADSAbstractRadarElement:calculateAspectInDegrees(harmHeading, ha
 		if aspect > 180 then
 			aspect = 360 - aspect
 		end
-		return mist.utils.round(aspect)
+		return UTILS.Round(aspect)
 end
 
 function SkynetIADSAbstractRadarElement:getNumberOfObjectsItentifiedAsHARMS()
@@ -3055,8 +3088,8 @@ function SkynetIADSAWACSRadar:scanForHarms()
 end
 
 function SkynetIADSAWACSRadar:getMaxAllowedMovementForAutonomousUpdateInNM()
-	--local radarRange = mist.utils.metersToNM(self.searchRadars[1]:getMaxRangeFindingTarget())
-	--return mist.utils.round(radarRange / 10)
+	--local radarRange = UTILS.MetersToNM(self.searchRadars[1]:getMaxRangeFindingTarget())
+	--return UTILS.Round(radarRange / 10)
 	--fixed to 10 nm miles to better fit small SAM sites
 	return 10
 end
@@ -3077,7 +3110,7 @@ function SkynetIADSAWACSRadar:getDistanceTraveledSinceLastUpdate()
 	if self:getDCSRepresentation():isExist() then
 		currentPosition = self:getDCSRepresentation():getPosition().p
 	end
-	return mist.utils.round(mist.utils.metersToNM(self:getDistanceToUnit(self.lastUpdatePosition, currentPosition)))
+	return UTILS.Round(UTILS.MetersToNM(self:getDistanceToUnit(self.lastUpdatePosition, currentPosition)))
 end
 
 end
@@ -3150,7 +3183,8 @@ end
 
 function SkynetIADSContact:getMagneticHeading()
 	if ( self:isExist() ) then
-		return mist.utils.round(mist.utils.toDegree(mist.getHeading(self:getDCSRepresentation())))
+		local position = self:getDCSRepresentation():getPosition()
+		return UTILS.Round(UTILS.ToDegree(UTILS.GetDirectionRadians(position.x, position.p)))
 	else
 		return -1
 	end
@@ -3191,12 +3225,12 @@ function SkynetIADSContact:getGroundSpeedInKnots(decimals)
 	if decimals == nil then
 		decimals = 2
 	end
-	return mist.utils.round(self.speed, decimals)
+	return UTILS.Round(self.speed, decimals)
 end
 
 function SkynetIADSContact:getHeightInFeetMSL()
 	if self:isExist() then
-		return mist.utils.round(mist.utils.metersToFeet(self:getDCSRepresentation():getPosition().p.y), 0)
+		return UTILS.Round(UTILS.MetersToFeet(self:getDCSRepresentation():getPosition().p.y), 0)
 	else
 		return 0
 	end
@@ -3219,7 +3253,7 @@ function SkynetIADSContact:refresh()
 		local timeDelta = (timer.getAbsTime() - self.lastTimeSeen)
 		if timeDelta > 0 then
 			self.numOfTimesRefreshed = self.numOfTimesRefreshed + 1
-			local distance = mist.utils.metersToNM(mist.utils.get2DDist(self.position.p, self:getDCSRepresentation():getPosition().p))
+			local distance = UTILS.MetersToNM(RetUtils.get2DDist(self.position.p, self:getDCSRepresentation():getPosition().p))
 			local hours = timeDelta / 3600
 			self.speed = (distance / hours)
 			self:updateSimpleAltitudeProfile()
@@ -3249,7 +3283,7 @@ function SkynetIADSContact:getSimpleAltitudeProfile()
 end
 
 function SkynetIADSContact:getAge()
-	return mist.utils.round(timer.getAbsTime() - self.lastTimeSeen)
+	return UTILS.Round(timer.getAbsTime() - self.lastTimeSeen)
 end
 
 end
@@ -3350,7 +3384,7 @@ end
 
 function SkynetIADSJammer:masterArmOn()
 	self:masterArmSafe()
-	self.jammerTaskID = mist.scheduleFunction(SkynetIADSJammer.runCycle, {self}, 1, 10)
+	self.jammerTaskID = RetUtils.newTimer(SkynetIADSJammer.runCycle, self):Start(nil, 10)
 end
 
 function SkynetIADSJammer:addFunction(natoName, jammerFunction)
@@ -3392,7 +3426,7 @@ function SkynetIADSJammer:getSuccessProbability(distanceNauticalMiles, natoName)
 end
 
 function SkynetIADSJammer:getDistanceNMToRadarUnit(radarUnit)
-	return mist.utils.metersToNM(mist.utils.get3DDist(self.emitter:getPosition().p, radarUnit:getPosition().p))
+	return UTILS.MetersToNM(UTILS.VecDist3D(self.emitter:getPosition().p, radarUnit:getPosition().p))
 end
 
 function SkynetIADSJammer.runCycle(self)
@@ -3434,7 +3468,8 @@ function SkynetIADSJammer:hasLineOfSightToRadar(radar)
 end
 
 function SkynetIADSJammer:masterArmSafe()
-	mist.removeFunction(self.jammerTaskID)
+	skynetStopTimer(self.jammerTaskID)
+	self.jammerTaskID = nil
 end
 
 --TODO: Remove Menu when emitter dies:
@@ -3522,7 +3557,7 @@ function SkynetIADSSAMSearchRadar:setFiringRangePercent(percent)
 end
 
 function SkynetIADSSAMSearchRadar:getDistance(target)
-	return mist.utils.get2DDist(target:getPosition().p, self:getDCSRepresentation():getPosition().p)
+	return RetUtils.get2DDist(target:getPosition().p, self:getDCSRepresentation():getPosition().p)
 end
 
 function SkynetIADSSAMSearchRadar:getHeight(target)
@@ -3651,7 +3686,7 @@ function SkynetIADSSamSite:setActMobile(enable, emissionTimeMax, scootDistanceMi
 
 	if not self.actMobile and enable then
 		self.actMobile = true
-		self.mobilePhaseEvaluateTaskID = mist.scheduleFunction(SkynetIADSSamSite.evaluateMobilePhase,{self},1, 5)
+		self.mobilePhaseEvaluateTaskID = RetUtils.newTimer(SkynetIADSSamSite.evaluateMobilePhase, self):Start(nil, 5)
 	elseif self.actMobile and not enable then
 		--TODO: implement this
 		self.actMobile = false
@@ -3675,10 +3710,8 @@ function SkynetIADSSamSite:relocateNow(newSiteZone)
 			self:getController():setOption(AI.Option.Air.id.ROE, AI.Option.Air.val.ROE.WEAPON_HOLD)
 		end
 
-		if self.mobilePhaseEvaluateTaskID ~= nil then
-			mist.removeFunction(self.mobilePhaseEvaluateTaskID)
-		end
-		self.mobilePhaseEvaluateTaskID = mist.scheduleFunction(SkynetIADSSamSite.evaluateMobilePhase,{self},1,5)
+		skynetStopTimer(self.mobilePhaseEvaluateTaskID)
+		self.mobilePhaseEvaluateTaskID = RetUtils.newTimer(SkynetIADSSamSite.evaluateMobilePhase, self):Start(nil, 5)
 	end
 	self.mobileSiteZone = newSiteZone
 
@@ -3692,10 +3725,7 @@ function SkynetIADSSamSite:relocateNow(newSiteZone)
 		ignoreRoads = true
 	end
 
-	local mistZone = {}
-	mistZone.point = self.mobileSiteZone.point
-	mistZone.radius = 1 --move dead center
-	mist.groupToRandomZone(self:getDCSRepresentation(), mistZone, formation, nil, 80, ignoreRoads)
+	self:routeToMobileSiteZone(formation, 80, ignoreRoads)
 
 	--have mobile point defences follow, if possible
 	for i = 1, #self.pointDefences do
@@ -3705,27 +3735,56 @@ function SkynetIADSSamSite:relocateNow(newSiteZone)
 	end
 end
 
+-- Drives the site to the centre of self.mobileSiteZone. When roads are allowed and the
+-- destination is not right next to the site, the group joins the nearest road first.
+function SkynetIADSSamSite:routeToMobileSiteZone(formation, speedKmph, ignoreRoads)
+	local group = self:getDCSRepresentation()
+	local destination = self.mobileSiteZone.point
+	local speed = UTILS.KmphToMps(speedKmph)
+	local heading = math.random() * 2 * math.pi
+	-- approach point 50 m short of the destination so the site arrives on a random heading
+	local approach = {
+		x = UTILS.Round(math.sin(heading - (math.pi / 2)) * 50 + destination.x, 3),
+		z = UTILS.Round(math.cos(heading + (math.pi / 2)) * 50 + destination.z, 3),
+	}
+	local path = {}
+	local start = RetUtils.getLeadPos(group)
+	if start then
+		path[#path + 1] = RetUtils.groundWaypoint(start, formation, speed)
+		if not ignoreRoads and RetUtils.get2DDist(destination, start) > 1.3 then
+			path[#path + 1] = RetUtils.groundWaypoint({x = start.x + 11, z = start.z + 11}, 'Off Road', speed)
+			path[#path + 1] = RetUtils.groundWaypoint(start, 'On Road', speed)
+			path[#path + 1] = RetUtils.groundWaypoint(approach, 'On Road', speed)
+		else
+			path[#path + 1] = RetUtils.groundWaypoint({x = start.x + 25, z = start.z + 25}, formation, speed)
+		end
+	end
+	path[#path + 1] = RetUtils.groundWaypoint(approach, formation, speed)
+	path[#path + 1] = RetUtils.groundWaypoint(destination, formation, speed)
+	RetUtils.routeGroup(group, path)
+end
+
 function SkynetIADSSamSite:selectNewLocation()
 	local newZone
 	if self.mobileScootZones == nil then --no pre-defined zones found, pick arbitrary direction, prefer to be on road
-		local currentPosition = mist.getLeadPos(self:getDCSRepresentation())
+		local currentPosition = RetUtils.getLeadPos(self:getDCSRepresentation())
 		local vec2Rand
 
 		for i = 1, 10 do
-			vec2Rand = mist.getRandPointInCircle(currentPosition,self.mobileScootDistanceMax, self.mobileScootDistanceMin)
+			vec2Rand = RetUtils.getRandPointInCircle(currentPosition,self.mobileScootDistanceMax, self.mobileScootDistanceMin)
 
 			if i <= 5 then
 				local vec2Road = {}
 				local distance
 				vec2Road.x, vec2Road.y = land.getClosestPointOnRoads("roads",vec2Rand.x,vec2Rand.y)
-				distance = mist.utils.get2DDist(currentPosition, vec2Road)
+				distance = RetUtils.get2DDist(currentPosition, vec2Road)
 				if distance < self.mobileScootDistanceMax and distance > self.mobileScootDistanceMin then
 					vec2Rand = vec2Road
 				end
 			end
 
 			local surfaceType = land.getSurfaceType(vec2Rand)
-			if (surfaceType == land.SurfaceType.LAND or surfaceType == land.SurfaceType.ROAD) and mist.terrainHeightDiff(vec2Rand,50) < 5 then
+			if (surfaceType == land.SurfaceType.LAND or surfaceType == land.SurfaceType.ROAD) and skynetTerrainHeightDiff(vec2Rand,50) < 5 then
 				break
 			end
 		end
@@ -3736,10 +3795,10 @@ function SkynetIADSSamSite:selectNewLocation()
 	else -- use pre-defined zones
 		--TODO: keep track of hot spots
 		--TODO: coordinate within battalion
-		local currentPosition = mist.getLeadPos(self:getDCSRepresentation())
+		local currentPosition = RetUtils.getLeadPos(self:getDCSRepresentation())
 		for i = 1, 10 do
-			newZone = mist.DBs.zonesByName[self.mobileScootZones[math.random(1, #self.mobileScootZones)]]
-			local distance = mist.utils.get3DDist(currentPosition, newZone.point)
+			newZone = trigger.misc.getZone(self.mobileScootZones[math.random(1, #self.mobileScootZones)])
+			local distance = UTILS.VecDist3D(currentPosition, newZone.point)
 			if distance > self.mobileScootDistanceMin and distance < self.mobileScootDistanceMax then
 				break
 			end
@@ -3753,7 +3812,7 @@ function SkynetIADSSamSite.evaluateMobilePhase(self)
 	-- check if our mission is over
 	if self:isDestroyed() then
 		if self.mobilePhaseEvaluateTaskID ~= nil then
-			mist.removeFunction(self.mobilePhaseEvaluateTaskID)
+			skynetStopTimer(self.mobilePhaseEvaluateTaskID)
 			self.mobilePhaseEvaluateTaskID = nil
 		end
 		return
@@ -3763,17 +3822,15 @@ function SkynetIADSSamSite.evaluateMobilePhase(self)
 		--emission has begun, entering shooting phase
 		self.mobilePhase = SkynetIADSSamSite.MOBILE_PHASE_SHOOT
 		self.mobilePhaseBeginTime = self.goLiveTime
-		if self.mobilePhaseEvaluateTaskID ~= nil then
-			mist.removeFunction(self.mobilePhaseEvaluateTaskID)
-		end
-		self.mobilePhaseEvaluateTaskID = mist.scheduleFunction(SkynetIADSSamSite.evaluateMobilePhase,{self},self.mobilePhaseBeginTime + self.mobilePhaseEmissionTimeMax,5)
+		skynetStopTimer(self.mobilePhaseEvaluateTaskID)
+		self.mobilePhaseEvaluateTaskID = RetUtils.newTimer(SkynetIADSSamSite.evaluateMobilePhase, self):Start(self.mobilePhaseBeginTime + self.mobilePhaseEmissionTimeMax - timer.getTime(), 5)
 	elseif self.mobilePhase == SkynetIADSSamSite.MOBILE_PHASE_SHOOT and not self:hasMissilesInFlight() and not self:getIsAPointDefence() and self:getAutonomousState() == false then
 		--find a new location
 		self:relocateNow(self:selectNewLocation())
 	elseif self.mobilePhase == SkynetIADSSamSite.MOBILE_PHASE_SCOOT then
 		--check if we are close enough to our destination
 		--TODO: better check
-		if mist.utils.get2DDist(mist.getLeadPos(self:getDCSRepresentation()), self.mobileSiteZone.point) < self.mobileSiteZone.radius
+		if RetUtils.get2DDist(RetUtils.getLeadPos(self:getDCSRepresentation()), self.mobileSiteZone.point) < self.mobileSiteZone.radius
 		or (self:getAutonomousState() == true and self:getAutonomousBehaviour() == SkynetIADSAbstractRadarElement.AUTONOMOUS_STATE_DCS_AI) then --FIXME: maybe make DCS_AI Autonomous keep on moving to intended spot?
 			--close enough, setup and wait
 			self.mobilePhase = SkynetIADSSamSite.MOBILE_PHASE_HIDE
