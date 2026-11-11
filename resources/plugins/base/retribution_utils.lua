@@ -119,20 +119,80 @@ end
 
 -- Scheduling --------------------------------------------------------------------
 
---- Creates a MOOSE TIMER whose callback runs protected: an error is written to
--- dcs.log instead of killing the timer, so a repeating timer keeps running
--- after a failed call. Start it with :Start(delay, interval) and stop it with
--- :Stop(), as with any TIMER.
+-- Scripted work that blocks the simulation for longer than this is reported in
+-- dcs.log, so a stalling script can be identified from the log.
+local SLOW_CALL_SECONDS = 0.05
+local clock = os and os.clock
+
+local function describe_function(fn)
+    local info = debug and debug.getinfo and debug.getinfo(fn, "S")
+    if info then
+        return string.format("%s:%s", tostring(info.short_src), tostring(info.linedefined))
+    end
+    return tostring(fn)
+end
+
+--- Calls fn(...) protected. An error is written to dcs.log instead of being
+-- raised, and a call that takes longer than 50 ms is reported there too.
+-- @param label name used in the log lines; defaults to the function's source
+--        location.
+-- @return true and the function's first result, or false on error.
+function RetUtils.guardedCall(label, fn, ...)
+    local started = clock and clock()
+    local ok, result = pcall(fn, ...)
+    if not ok then
+        env.error(
+            string.format(
+                "RetUtils: error in %s: %s",
+                label or describe_function(fn),
+                tostring(result)
+            )
+        )
+    end
+    if started then
+        local elapsed = clock() - started
+        if elapsed > SLOW_CALL_SECONDS then
+            env.warning(
+                string.format(
+                    "RetUtils: slow script call: %s took %.0f ms",
+                    label or describe_function(fn),
+                    elapsed * 1000
+                )
+            )
+        end
+    end
+    return ok, result
+end
+
+--- Creates a MOOSE TIMER whose callback runs through RetUtils.guardedCall: an
+-- error is written to dcs.log instead of killing the timer, so a repeating
+-- timer keeps running after a failed call, and slow calls are reported.
+-- Start it with :Start(delay, interval) and stop it with :Stop(), as with any
+-- TIMER.
+--
+-- Unlike a plain TIMER, it is safe to stop from inside its own callback. A
+-- plain repeating TIMER stopped that way still hands DCS its next call time
+-- when the callback returns, so it keeps firing forever.
 -- @param fn function to call.
 -- @param ... arguments passed to fn on every call.
 function RetUtils.newTimer(fn, ...)
+    local scheduled
     local function protected(...)
-        local ok, err = pcall(fn, ...)
-        if not ok then
-            env.error("RetUtils.newTimer: error in scheduled function: " .. tostring(err))
+        RetUtils.guardedCall(nil, fn, ...)
+        if scheduled.stopRequested then
+            -- Without an interval MOOSE ends the timer instead of rescheduling it.
+            scheduled.dT = nil
         end
     end
-    return TIMER:New(protected, ...)
+    scheduled = TIMER:New(protected, ...)
+    local moose_stop = scheduled.Stop
+    scheduled.Stop = function(self, delay)
+        if not delay or delay <= 0 then
+            self.stopRequested = true
+        end
+        return moose_stop(self, delay)
+    end
+    return scheduled
 end
 
 -- Geometry ----------------------------------------------------------------------

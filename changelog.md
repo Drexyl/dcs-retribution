@@ -38,6 +38,9 @@
 * **[Modding]** Update UH-60L mod to v2.1.5 including MH-60L DAP
 * **[Plugins]** Generated missions no longer load MIST. The base scripts, CTLD, Skynet IADS, Dismounts, EW Script, EWRS and the Pretense scripts now run on MOOSE plus a small shared helper (`retribution_utils.lua`), in preparation for removing MIST entirely. Pretense missions now load MOOSE as a library; MOOSE-based plugins remain excluded from them. Coordinate read-outs from CTLD and Pretense use MOOSE's formatting (degree signs, zero-padded degrees, truncated rather than rounded MGRS digits).
 * **[Mission Generator]** Units moved off water (or ships moved off land) at mission start now keep their original route, waypoint tasks and late-activation state.
+* **[Performance]** The mission state file is now written incrementally: each recorded event is encoded once instead of the whole history being re-encoded every 15 seconds, so the periodic write no longer gets slower as a mission goes on (about 200 ms down to about 10 ms with 5,000 recorded events).
+* **[Performance]** Fixed Skynet IADS timers that kept firing after being stopped from inside their own callback (out-of-ammo sites, relocating mobile SAMs).
+* **[Mission Generator]** Freezes are now diagnosable from `dcs.log`: the base script logs `simulation stalled for N s` whenever the mission falls behind real time, and `slow script call` for any scheduled script function or state write that blocks for more than 50 ms.
 * **[Performance]** Lower script overhead in generated missions: MIST's 100-times-a-second scheduler and unit database upkeep are gone (scheduled work now runs on native DCS timers), Skynet IADS queries each radar contact's description once per update instead of once per SAM site, base-capture triggers test their flag before scanning every ground unit in the zone, and Pretense looks trigger zones up from an index instead of scanning the zone list.
 
 ## Fixes

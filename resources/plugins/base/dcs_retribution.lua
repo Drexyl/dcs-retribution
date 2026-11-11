@@ -34,6 +34,44 @@ local function messageAll(message)
     MESSAGE:New(message, 25):ToAll()
 end
 
+-- The event lists only ever grow, and encoding them is by far the most expensive
+-- part of writing the state (tens of microseconds per entry), so each entry is
+-- encoded once and the encoded text is kept. A write then costs time
+-- proportional to the new entries rather than to everything recorded so far.
+local encoded_lists = {}
+
+local function encode_append_only_list(key, list)
+    local cache = encoded_lists[key]
+    if not cache or cache.list ~= list or cache.count > #list then
+        -- First use, or the list was replaced or shortened: start over.
+        cache = { list = list, count = 0, parts = {} }
+        encoded_lists[key] = cache
+    end
+    for i = cache.count + 1, #list do
+        cache.parts[i] = json:encode(list[i])
+    end
+    cache.count = #list
+    return '"' .. key .. '":[' .. table.concat(cache.parts, ",") .. "]"
+end
+
+local function encode_state()
+    return "{"
+        .. table.concat({
+            encode_append_only_list("crash_events", crash_events),
+            encode_append_only_list("dead_events", dead_events),
+            encode_append_only_list("base_capture_events", base_capture_events),
+            encode_append_only_list("unit_lost_events", unit_lost_events),
+            encode_append_only_list("kill_events", kill_events),
+            '"mission_ended":' .. tostring(mission_ended == true),
+            encode_append_only_list("destroyed_objects_positions", destroyed_objects_positions),
+            -- Ejection entries are updated in place when the pilot lands, so this
+            -- (short) list is encoded in full every time.
+            '"ejection_events":' .. json:encode(ejection_events),
+            encode_append_only_list("csar_rescued", csar_rescued),
+        }, ",")
+        .. "}"
+end
+
 function write_state()
     local _debriefing_file_location = debriefing_file_location
     if not debriefing_file_location or debriefing_file_location == "" then
@@ -44,27 +82,28 @@ function write_state()
         error("Unable to save DCS Retribution state, JSON library is not loaded")
     end
 
+    local started = os and os.clock()
+    -- Encode before opening the file, so the previous state is not truncated if
+    -- encoding fails.
+    local state = encode_state()
+
     local fp, open_error = io.open(_debriefing_file_location, 'w')
     if not fp then
         error("Unable to open state file for writing: "..tostring(_debriefing_file_location).." ("..tostring(open_error)..")")
     end
-    local game_state = {
-        ["crash_events"] = crash_events,
-        ["dead_events"] = dead_events,
-        ["base_capture_events"] = base_capture_events,
-		["unit_lost_events"] = unit_lost_events,
-		["kill_events"] = kill_events,
-        ["mission_ended"] = mission_ended,
-        ["destroyed_objects_positions"] = destroyed_objects_positions,
-        ["ejection_events"] = ejection_events,
-        ["csar_rescued"] = csar_rescued,
-    }
     local ok, write_error = pcall(function()
-        fp:write(json:encode(game_state))
+        fp:write(state)
     end)
     fp:close()
     if not ok then
         error(write_error)
+    end
+
+    if started then
+        local elapsed = os.clock() - started
+        if elapsed > 0.05 then
+            logger:warn(string.format("writing the state took %.0f ms (%d bytes)", elapsed * 1000, #state))
+        end
     end
 end
 
@@ -261,12 +300,46 @@ end
 
 world.addEventHandler({
     onEvent = function(_, event)
-        onEvent(event)
+        -- Protected, and reported in dcs.log if a single event takes too long.
+        RetUtils.guardedCall("dcs_retribution event handler", onEvent, event)
     end,
 })
 
 dirty_state = true
 write_state_error_handling()
+
+-- Stall monitor
+-- Once per second of mission time, compares how much real time went by. When the
+-- simulation falls well behind real time (a freeze, which players see as other
+-- aircraft warping) the stall is written to dcs.log with its mission time, so it
+-- can be matched against the "slow script call" lines and the rest of the log.
+-- A stall with no slow script call next to it was not caused by a mission script.
+-- Timers do not run while the server is paused, so a pause is reported as one
+-- stall of the pause's length when the mission resumes.
+local STALL_CHECK_INTERVAL_SECONDS = 1
+local STALL_REPORT_THRESHOLD_SECONDS = 0.75
+
+local function start_stall_monitor()
+    if not (os and os.clock) then
+        return
+    end
+    local last_real = os.clock()
+    local last_mission = timer.getTime()
+    timer.scheduleFunction(function(_, now)
+        local real = os.clock()
+        local behind = (real - last_real) - (now - last_mission)
+        if behind > STALL_REPORT_THRESHOLD_SECONDS then
+            logger:warn(string.format(
+                "simulation stalled for %.1f s (mission time %.0f s, script memory %.0f MB)",
+                behind, now, collectgarbage("count") / 1024
+            ))
+        end
+        last_real, last_mission = real, now
+        return now + STALL_CHECK_INTERVAL_SECONDS
+    end, nil, timer.getTime() + STALL_CHECK_INTERVAL_SECONDS)
+end
+
+start_stall_monitor()
 
 -- Escort leash
 -- Escorts are kept within their engagement range relative to the escorted group.

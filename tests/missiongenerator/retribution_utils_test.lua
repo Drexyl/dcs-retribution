@@ -187,16 +187,30 @@ local function setup()
             }
         end,
     }
-    TIMER = {
-        New = function(_, fn, ...)
-            local args = { ... }
-            return {
-                fire = function()
-                    return fn(unpack(args))
-                end,
-            }
-        end,
-    }
+    -- Mirrors the parts of MOOSE's TIMER that matter here: _Function returns the
+    -- next call time for a repeating timer (which makes DCS call it again) unless
+    -- the timer has no interval, and Stop() only removes the pending DCS timer.
+    TIMER = {}
+    TIMER.__index = TIMER
+    function TIMER:New(fn, ...)
+        return setmetatable({ func = fn, para = { ... }, stops = 0 }, TIMER)
+    end
+    function TIMER:Start(_, interval)
+        self.dT = interval
+        return self
+    end
+    function TIMER:Stop()
+        self.stops = self.stops + 1
+        return self
+    end
+    function TIMER:_Function(time)
+        self.func(unpack(self.para))
+        if self.dT == nil then
+            self:Stop()
+            return nil
+        end
+        return time + self.dT
+    end
     _DATABASE = {
         Templates = { Groups = {}, Units = {} },
         Spawn = function(_, template)
@@ -518,10 +532,62 @@ local function test_protected_timer_survives_errors()
         check(a == "x" and b == 2, "arguments forwarded")
         error("boom")
     end, "x", 2)
-    scheduled.fire()
-    scheduled.fire()
+    scheduled:Start(nil, 5)
+    check(scheduled:_Function(100) == 105, "repeating timer reschedules after an error")
+    check(scheduled:_Function(105) == 110, "and keeps rescheduling")
     check(calls == 2, "callback keeps being called after an error")
     check(#errors == 2, "each failure is logged")
+end
+
+local function test_timer_stopped_from_its_own_callback_ends()
+    setup()
+    local scheduled
+    local calls = 0
+    scheduled = RetUtils.newTimer(function()
+        calls = calls + 1
+        if calls == 2 then
+            scheduled:Stop()
+        end
+    end)
+    scheduled:Start(nil, 2)
+
+    check(scheduled:_Function(10) == 12, "running timer hands DCS its next call time")
+    check(scheduled:_Function(12) == nil, "a timer stopped inside its callback is not rescheduled")
+    check(scheduled.stops >= 1, "the MOOSE stop still runs")
+end
+
+local function test_timer_stopped_from_outside_stays_reusable_until_then()
+    setup()
+    local scheduled = RetUtils.newTimer(function() end)
+    scheduled:Start(nil, 2)
+    check(scheduled:_Function(10) == 12, "repeats while running")
+    scheduled:Stop()
+    check(scheduled.stops == 1, "stop forwarded to MOOSE")
+    check(scheduled:_Function(12) == nil, "a late call after an outside stop does not reschedule")
+end
+
+local function test_guarded_call_reports_errors_and_slow_calls()
+    setup()
+    local ok, result = RetUtils.guardedCall("fast", function(a)
+        return a * 2
+    end, 21)
+    check(ok == true and result == 42, "result passed through")
+    check(#errors == 0 and #warnings == 0, "a fast, successful call logs nothing")
+
+    ok = RetUtils.guardedCall("broken", function()
+        error("boom")
+    end)
+    check(ok == false and #errors == 1, "errors are caught and logged")
+    check(string.find(errors[1], "broken", 1, true) ~= nil, "the label is in the error line")
+
+    -- Busy-wait a little over the 50 ms threshold.
+    RetUtils.guardedCall("slow", function()
+        local started = os.clock()
+        while os.clock() - started < 0.06 do
+        end
+    end)
+    check(#warnings == 1, "a slow call is reported")
+    check(string.find(warnings[1], "slow", 1, true) ~= nil, "the label is in the warning line")
 end
 
 local function test_ground_routing_helpers()
@@ -567,6 +633,9 @@ local tests = {
     test_teleport_unknown_or_dead_group,
     test_respawn_from_template_uses_database_spawn,
     test_protected_timer_survives_errors,
+    test_timer_stopped_from_its_own_callback_ends,
+    test_timer_stopped_from_outside_stays_reusable_until_then,
+    test_guarded_call_reports_errors_and_slow_calls,
     test_ground_routing_helpers,
 }
 
