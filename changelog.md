@@ -18,7 +18,6 @@
 * **[Mission Generator]** New campaign setting "Default laser code for Player flights" controls whether newly-created player flights are assigned a unique allocated TGP/weapon laser code (the new default, matching existing behavior) or stay on 1688. When a code is allocated it is applied to both the TGP/kneeboard code and the weapon code by default, so LGBs home on the player's own code without extra clicks; both remain independently overridable in the payload tab.
 * **[Engine]** Support for DCS 2.9.28.26283 including F-100D, F-14A (Export), and F-14BU.
 * **[Options]** Add new option to fast forward until player is at the IP.
-* **[Modding]** Update to CJS Super Hornet Mod to v2.4.5.260501.RC1
 * **[Modding]** Update Community A4EC Mod to 2.3.0 (May 2025)
 * **[Mission Generator]** Squadrons now spawn using the proper country instead of CTJF, enabling various DCS AI voiceovers
 * **[Options]** New option to restrict helmet devices by date
@@ -28,6 +27,7 @@
 * **[UX]** Add the ability to filter campaigns by version, map, and performance
 * **[Engine]** Bump campaign version to 10.9 for motorpool support
 * **[Modding]** Update UH-60L mod to v2.1.5 including MH-60L DAP
+* **[Modding]** Update to CJS Super Hornet Mod to v2.4.6.260725.RC3
 
 ## Fixes
 * **[Mission Generation]** Fix mission generation dying on "Duplicate convoy unit": convoy and cargo-ship names no longer reset each turn onto a convoy still in transit.
