@@ -30,6 +30,9 @@ class RaceTrackBuilder(PydcsWaypointBuilder):
             else:
                 waypoint.tasks.insert(0, SetUnlimitedFuelCommand(False))
 
+        # EW Script 3.0: open the AI jamming window
+        self.ewscript3_window(waypoint, True)
+
         if not isinstance(flight_plan, PatrollingFlightPlan):
             flight_plan_type = flight_plan.__class__.__name__
             logging.error(

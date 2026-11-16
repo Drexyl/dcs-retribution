@@ -14,6 +14,7 @@ from game.ato.flightwaypointtype import FlightWaypointType
 from game.ato.starttype import StartType
 from game.ato.traveltime import GroundSpeed
 from game.data.weapons import WeaponType
+from game.missiongenerator.aircraft import ewscript3
 from game.missiongenerator.missiondata import MissionData
 from game.theater import MissionTarget, TheaterUnit, OffMapSpawn
 
@@ -200,6 +201,22 @@ class PydcsWaypointBuilder:
                 script_content = f'{action}IAdefjamming("{unit.name}")'
                 jamming_script = RunScript(script_content)
                 waypoint.tasks.append(jamming_script)
+
+    def ewscript3_window(self, waypoint: MovingPoint, armed: bool) -> None:
+        # Opens/closes the AI jamming window of EW Script 3.0 (EA-18G AEA) jammers
+        settings = self.flight.coalition.game.settings
+        if not ewscript3.ewscript3_enabled(settings):
+            return
+        if not ewscript3.ewscript3_option(settings, "ai_enabled"):
+            return
+        for unit, member in zip(self.group.units, self.flight.iter_members()):
+            if member.is_player:
+                continue
+            if ewscript3.jammer_loadout_key(member, self.flight) is None:
+                continue
+            waypoint.tasks.append(
+                RunScript(ewscript3.set_armed_script(unit.name, armed))
+            )
 
     def offensive_jamming(self, waypoint: MovingPoint, action: str) -> None:
         # Silences enemy radars through the EW-Jamming script

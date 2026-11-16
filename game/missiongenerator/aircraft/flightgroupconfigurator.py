@@ -33,6 +33,7 @@ from game.missiongenerator.missiondata import EscortInfo
 from game.squadrons import Pilot
 from .aircraftbehavior import AircraftBehavior
 from .aircraftpainter import AircraftPainter
+from . import ewscript3
 from .bingoestimator import BingoEstimator
 from .flightdata import FlightData
 from .waypoints import WaypointGenerator
@@ -218,6 +219,36 @@ class FlightGroupConfigurator:
             laser_codes.append(None)
 
         self.handle_ew_jamming(member, unit)
+        self.handle_ewscript3(member, unit)
+
+    def handle_ewscript3(self, member: FlightMember, unit: FlyingUnit) -> None:
+        # EW Script 3.0 (EA-18G AEA): register aircraft carrying offensive jamming pods
+        settings = self.flight.coalition.game.settings
+        if not ewscript3.ewscript3_enabled(settings):
+            return
+        loadout = ewscript3.jammer_loadout_key(member, self.flight)
+        if loadout is None:
+            return
+        ai = not member.is_player
+        if ai and not ewscript3.ewscript3_option(settings, "ai_enabled"):
+            return
+        if not ai and not ewscript3.ewscript3_option(settings, "players_enabled"):
+            return
+        trigger = TriggerStart(comment=f"EWScript3-{unit.name}")
+        trigger.add_action(
+            DoScript(
+                String(
+                    ewscript3.register_jammer_script(
+                        unit.name,
+                        loadout,
+                        ai=ai,
+                        gated=ewscript3.flight_has_jamming_window(self.flight),
+                        max_targets=ewscript3.jammer_max_targets(member, self.flight),
+                    )
+                )
+            )
+        )
+        self.mission.triggerrules.triggers.append(trigger)
 
     def handle_ew_jamming(self, member: FlightMember, unit: FlyingUnit) -> None:
         if not member.is_player:

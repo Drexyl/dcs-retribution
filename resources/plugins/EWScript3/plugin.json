@@ -1,0 +1,93 @@
+{
+    "nameInUI": "EW Script 3.0 (EA-18G AEA)",
+    "defaultValue": false,
+    "specificOptions": [
+        {
+            "nameInUI": "Player AEA menu (ALQ-99/ALQ-249 slots)",
+            "mnemonic": "players_enabled",
+            "defaultValue": true
+        },
+        {
+            "nameInUI": "Enable AI jammers",
+            "mnemonic": "ai_enabled",
+            "defaultValue": true
+        },
+        {
+            "nameInUI": "AI: only jam inside mission window (JOIN-SPLIT / racetrack)",
+            "mnemonic": "ai_window_gating",
+            "defaultValue": true
+        },
+        {
+            "nameInUI": "AI: pre-emptively jam active search/EW radars",
+            "mnemonic": "ai_jam_search",
+            "defaultValue": false
+        },
+        {
+            "nameInUI": "Protect friendly aircraft within (NM)",
+            "mnemonic": "ai_protect_radius_nm",
+            "minimumValue": 5,
+            "maximumValue": 60,
+            "defaultValue": 25
+        },
+        {
+            "nameInUI": "AI: keep transmitting after last threat (seconds)",
+            "mnemonic": "ai_hold_sec",
+            "minimumValue": 5,
+            "maximumValue": 300,
+            "defaultValue": 30
+        },
+        {
+            "nameInUI": "Jamming range multiplier",
+            "mnemonic": "range_multiplier",
+            "minimumValue": 0.1,
+            "maximumValue": 2.0,
+            "defaultValue": 0.7
+        },
+        {
+            "nameInUI": "Missile disruption chance (0-1)",
+            "mnemonic": "missile_disrupt_chance",
+            "minimumValue": 0.0,
+            "maximumValue": 1.0,
+            "defaultValue": 0.5
+        },
+        {
+            "nameInUI": "Missile disruption range (NM)",
+            "mnemonic": "missile_disrupt_nm",
+            "minimumValue": 1,
+            "maximumValue": 30,
+            "defaultValue": 10
+        },
+        {
+            "nameInUI": "Jam enemy AI aircraft radars",
+            "mnemonic": "air_effects",
+            "defaultValue": true
+        },
+        {
+            "nameInUI": "DEBUG - write to dcs.log",
+            "mnemonic": "DEBUG_LOG",
+            "defaultValue": false
+        },
+        {
+            "nameInUI": "DEBUG - in-game messages",
+            "mnemonic": "DEBUG_MESSAGES",
+            "defaultValue": false
+        },
+        {
+            "nameInUI": "DEBUG - verbose (scans, scores, ECCM rolls)",
+            "mnemonic": "DEBUG_VERBOSE",
+            "defaultValue": false
+        }
+    ],
+    "scriptsWorkOrders": [
+        {
+            "file": "Growler_AEA_with_MRAD.lua",
+            "mnemonic": "ewscript3"
+        }
+    ],
+    "configurationWorkOrders": [
+        {
+            "file": "ewscript3_config.lua",
+            "mnemonic": "ewscript3_config"
+        }
+    ]
+}
