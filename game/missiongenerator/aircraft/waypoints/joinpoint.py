@@ -34,6 +34,9 @@ class JoinPointBuilder(PydcsWaypointBuilder):
         else:
             waypoint.tasks.append(OptFormation.finger_four_open())
 
+        # EW Script 3.0: open the AI jamming window
+        self.ewscript3_window(waypoint, True)
+
         doctrine = self.flight.coalition.doctrine
 
         if self.flight.flight_type == FlightType.ESCORT:

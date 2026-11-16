@@ -16,6 +16,9 @@ class RaceTrackEndBuilder(PydcsWaypointBuilder):
         if self.flight.squadron.coalition.game.settings.ai_unlimited_fuel:
             waypoint.tasks.insert(0, SetUnlimitedFuelCommand(True))
 
+        # EW Script 3.0: close the AI jamming window
+        self.ewscript3_window(waypoint, False)
+
         # Disable Offensive Jamming at Racetrack End
         if self.flight.flight_type == FlightType.AEWC:
             # Stop Defensive Jamming for all AWACS flights

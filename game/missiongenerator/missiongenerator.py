@@ -320,6 +320,12 @@ class MissionGenerator:
 
         if self.game.settings.plugins.get("ewrj"):
             self._configure_react_to_threat_for_ew_jamming_packages(aircraft_generator)
+            if self.game.settings.plugins.get("EWScript3"):
+                logging.warning(
+                    "EW Script 2.1 (ewrj) and EW Script 3.0 (EWScript3) are both "
+                    "enabled. They act independently on SAMs and missiles; enable "
+                    "only one of them."
+                )
 
     def _live_unit_positions(self) -> list[tuple[float, float]]:
         # World (x, z) of every live unit already spawned (TGO SAM/BAI, FARP depots,

@@ -18,6 +18,9 @@ class SplitPointBuilder(PydcsWaypointBuilder):
         if self.flight.squadron.coalition.game.settings.ai_unlimited_fuel:
             waypoint.tasks.insert(0, SetUnlimitedFuelCommand(True))
 
+        # EW Script 3.0: close the AI jamming window
+        self.ewscript3_window(waypoint, False)
+
         if not self.flight.flight_type.is_air_to_air:
             # Capture any non A/A type to avoid issues with SPJs that use the primary radar such as the F/A-18C.
             # You can bully them with STT to not be able to fire radar guided missiles at you,
