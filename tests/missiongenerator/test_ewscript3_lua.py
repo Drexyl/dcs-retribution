@@ -222,3 +222,138 @@ def test_both_ew_scripts_enabled_warns() -> None:
 def test_no_warning_without_ewrj() -> None:
     s = Sim("")
     assert not any("both enabled" in line for line in s.logs())
+
+
+# --- ALQ-249 (NGJ-MB) -------------------------------------------------------
+
+
+def test_ngj_loadout_jams_nine_groups() -> None:
+    s = Sim("DEBUG_LOG=true")
+    s.run('AEA_RegisterJammer("Growler-1", {loadout="2xALQ249_1xALQ99", ai=true})')
+    assert s.has_log("Growler-1: registered (AI) loadout=2xALQ249_1xALQ99 maxTargets=9")
+
+
+@pytest.mark.parametrize(
+    "loadout,band,resist,hold,burn",
+    [
+        ("2xALQ99", "S", 0.0, 1.0, 1.0),
+        ("1xALQ249", "S", -0.04, 1.10, 0.80),
+        ("2xALQ249", "S", -0.08, 1.10, 0.80),
+        ("2xALQ249", "X", 0.05, 1.0, 1.0),
+        ("2xALQ249_1xALQ99", "X", 0.0, 1.0, 1.0),
+    ],
+)
+def test_ngj_mid_band_modifiers(
+    loadout: str, band: str, resist: float, hold: float, burn: float
+) -> None:
+    s = Sim("")
+    mods = s.g.AEA_Internals.ngjMods(loadout, band)
+    assert mods.resistAdd == pytest.approx(resist)
+    assert mods.holdMul == pytest.approx(hold)
+    assert mods.burnMul == pytest.approx(burn)
+
+
+# --- Self-protection jammers -------------------------------------------------
+
+VIPER = """
+addGroup(coalition.side.BLUE, Group.Category.AIRPLANE, "Viper", {
+  {name="Viper-1", type="F-16C_50", pos={x=0, y=7000, z=1000}, radar=true},
+})
+"""
+
+
+def spj_sim(options: str = "DEBUG_LOG=true", gen: int = 2) -> Sim:
+    s = Sim(options)
+    s.run(VIPER)
+    s.run(
+        f'AEA_RegisterSelfProtect("Viper-1", {{gen={gen}, pod="AN/ALQ-184 ECM", ai=true}})'
+    )
+    return s
+
+
+def test_spj_breaks_track_on_radar_tracking_carrier() -> None:
+    s = spj_sim()
+    assert s.has_log(
+        "Viper-1: registered self-protection (AI) pod=AN/ALQ-184 ECM gen=2"
+    )
+    s.run('U("SA11-LN")._radarOn = true; U("SA11-LN")._tracked = U("Viper-1")')
+    s.advance(60)
+    assert s.has_log("Viper-1: SPJ ON - tracked by SA-11 Buk LN 9A310M1 (SA-11 site)")
+    assert s.has_log("Viper-1: SPJ TRACK BREAK SA-11 Buk LN 9A310M1 (SA-11 site)")
+    # only the tracking radar is affected, friendly SAMs never
+    assert set(s.roe()) == {"SA11-LN"}
+    # and it is released again
+    s.run('U("SA11-LN")._radarOn = false; U("SA11-LN")._tracked = nil')
+    s.advance(10)
+    assert s.roe()["SA11-LN"] == 2
+    assert s.has_log("Viper-1: SPJ OFF - no longer tracked")
+
+
+def test_spj_ignores_radar_tracking_other_aircraft() -> None:
+    s = spj_sim()
+    light_up(s)  # SA-11 tracks Strike-1, not the SPJ carrier
+    s.advance(30)
+    assert not s.has_log("SPJ ON")
+    assert s.roe() == {}
+
+
+def test_spj_burned_through_close_in() -> None:
+    s = spj_sim("DEBUG_LOG=true, DEBUG_VERBOSE=true")
+    s.run('U("Viper-1")._pos = {x=30*NM, y=7000, z=0}')  # 10 NM from the SA-11
+    s.run('U("SA11-LN")._radarOn = true; U("SA11-LN")._tracked = U("Viper-1")')
+    s.advance(30)
+    assert s.has_log("SPJ ON")
+    assert s.has_log("SPJ BURNED THROUGH")
+    assert not s.has_log("SPJ TRACK BREAK")
+
+
+def test_spj_breaks_enemy_fighter_lock() -> None:
+    s = spj_sim()
+    s.run("""
+      addGroup(coalition.side.RED, Group.Category.AIRPLANE, "Flanker", {
+        {name="Flanker-1", type="Su-27", pos={x=30*NM, y=7000, z=0}, radar=true},
+      })
+      U("Flanker-1")._radarOn = true; U("Flanker-1")._tracked = U("Viper-1")
+    """)
+    s.advance(80)
+    assert s.has_log("SPJ TRACK BREAK Flanker-1 (Su-27, air)")
+
+
+def test_spj_missile_defeat_only_for_missiles_at_carrier() -> None:
+    s = spj_sim(gen=3)
+    s.run("""
+      for i = 1, 20 do
+        fireShot(U("SA11-LN"), makeWeapon("AT-VIPER" .. i, coalition.side.RED, "SA9M317",
+          Weapon.GuidanceType.RADAR_SEMI_ACTIVE, {x=2000, y=7000, z=1000}, U("Viper-1")))
+        fireShot(U("SA11-LN"), makeWeapon("AT-STRIKE" .. i, coalition.side.RED, "SA9M317",
+          Weapon.GuidanceType.RADAR_SEMI_ACTIVE, {x=6000, y=7000, z=0}, U("Strike-1")))
+      end
+    """)
+    s.advance(10)
+    destroyed = list(s.g.DESTROYED.values())
+    assert 0 < len([d for d in destroyed if d.startswith("AT-VIPER")]) < 20
+    assert not any(d.startswith("AT-STRIKE") for d in destroyed)
+    assert s.has_log("SPJ MSL ROLL SA9M317", "thr=0.35")
+
+
+def test_spj_disabled_option() -> None:
+    s = spj_sim("DEBUG_LOG=true, spj_enabled=false")
+    assert s.has_log("Viper-1: self-protection jammers disabled")
+    s.run('U("SA11-LN")._radarOn = true; U("SA11-LN")._tracked = U("Viper-1")')
+    s.advance(30)
+    assert not s.has_log("SPJ ON")
+
+
+def test_spj_players_option() -> None:
+    s = Sim("DEBUG_LOG=true, spj_players=false")
+    s.run(VIPER)
+    s.run('AEA_RegisterSelfProtect("Viper-1", {gen=2, ai=false})')
+    assert s.has_log("self-protection for players disabled")
+
+
+def test_aea_jammer_replaces_self_protection() -> None:
+    s = Sim("DEBUG_LOG=true")
+    s.run('AEA_RegisterJammer("Growler-1", {loadout="2xALQ99", ai=true})')
+    s.run('AEA_RegisterSelfProtect("Growler-1", {gen=3, ai=true})')
+    assert s.has_log("Growler-1: already an AEA jammer")
+    assert s.g.AEA_Internals.state.selfProtect["Growler-1"] is None

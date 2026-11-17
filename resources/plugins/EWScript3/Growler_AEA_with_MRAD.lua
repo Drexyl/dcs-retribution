@@ -13,6 +13,7 @@
 --  * Public API for mission generators:
 --      AEA_RegisterJammer(unitName, {loadout="2xALQ99", ai=true|false, gated=true|false, maxTargets=n})
 --      AEA_SetArmed(unitName, true|false)   -- mission window (JOIN->SPLIT, RACETRACK START->END)
+--      AEA_RegisterSelfProtect(unitName, {gen=1|2|3, pod="AN/ALQ-184 ECM", ai=true|false})
 --    The "[EA-18G]" unit name prefix is kept as a fallback (players, and AI when ai_enabled).
 --  * AI controller: AI jammers transmit only while armed (mission window) AND while the protected package is
 --    lit up (an enemy radar is tracking a friendly aircraft near the jammer) or under missile threat, then go
@@ -23,6 +24,10 @@
 --    burnThroughNm) and the duplicated band resist block; a SAM is only released from WEAPON HOLD once its
 --    latest suppression has expired; emitter scans are cached and shared between jammers; the RWR only lists
 --    enemy radars that are actually emitting.
+--  * ALQ-249 (NGJ-MB): more simultaneous targets (up to 9), single ALQ-249 loadouts, and mid-band (S) ECCM /
+--    hold / burn-through bonuses; NGJ-only loadouts are slightly weaker against X-band fire-control radars.
+--  * Self-protection jammers (defensive ECM pods / internal suites): track breaks on radars tracking the
+--    carrier and a missile defeat roll for radar missiles aimed at the carrier. See SELF-PROTECTION JAMMERS.
 -------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 -- CONFIG (Lua-only)
@@ -62,6 +67,10 @@ local OPTION_DEFAULTS = {
   missile_disrupt_chance = 0.50,
   missile_disrupt_nm = 10,
   air_effects = true,
+  spj_enabled = true,               -- self-protection jammers (WeaponType.JAMMER pods / internal ECM)
+  spj_players = true,
+  spj_missile_chance = 0.25,        -- scaled by pod generation (x0.6 / x1.0 / x1.4)
+  spj_missile_nm = 5,
   DEBUG_LOG = false,
   DEBUG_MESSAGES = false,
   DEBUG_VERBOSE = false,
@@ -192,6 +201,8 @@ local AEA = {
   suppressed = {},        -- [targetKey] = {["until"] =sec, lastSet=sec}
   airCooldown = {},       -- [airUnitName] = nextAllowedTime
   emitterCache = {},      -- [side] = {t=sec, jam={}, threat={}}
+  airCache = {},          -- [side] = {t=sec, units={}}  radar-equipped AI aircraft
+  selfProtect = {},       -- [unitName] = self-protection jammer state (see SELF-PROTECTION JAMMERS)
 }
 
 local DEFAULTS = {
@@ -318,13 +329,40 @@ local function heartbeat(st, unit)
   end
 end
 
+-- eff: jamming range factor, heat: (informational) heat factor
+-- Retribution additions:
+--   maxT    : default / AI number of simultaneously jammed groups
+--   menuMax : largest MAX TARGETS value offered in the player menu
+--   ngj     : number of ALQ-249 Mid Band (NGJ-MB) pods, alq99 : number of ALQ-99 pods
+-- The NGJ-MB is a GaN AESA with several independently steered beams and much higher ERP than the ALQ-99,
+-- so NGJ loadouts jam more groups at once and get mid-band bonuses (see ngjMods).
 local LOADOUTS = {
-  ["1xALQ99"]          = {eff=0.85, heat=1.10},
-  ["2xALQ99"]          = {eff=1.00, heat=1.00},
-  ["3xALQ99"]          = {eff=1.10, heat=1.15},
-  ["2xALQ249"]         = {eff=1.15, heat=0.90},
-  ["2xALQ249_1xALQ99"] = {eff=1.20, heat=1.00},
+  ["1xALQ99"]          = {eff=0.85, heat=1.10, maxT=2, menuMax=6, ngj=0, alq99=1},
+  ["2xALQ99"]          = {eff=1.00, heat=1.00, maxT=4, menuMax=6, ngj=0, alq99=2},
+  ["3xALQ99"]          = {eff=1.10, heat=1.15, maxT=6, menuMax=6, ngj=0, alq99=3},
+  ["1xALQ249"]         = {eff=1.00, heat=0.95, maxT=4, menuMax=6, ngj=1, alq99=0},
+  ["1xALQ249_1xALQ99"] = {eff=1.10, heat=1.00, maxT=4, menuMax=6, ngj=1, alq99=1},
+  ["1xALQ249_2xALQ99"] = {eff=1.15, heat=1.05, maxT=6, menuMax=9, ngj=1, alq99=2},
+  ["2xALQ249"]         = {eff=1.15, heat=0.90, maxT=6, menuMax=9, ngj=2, alq99=0},
+  ["2xALQ249_1xALQ99"] = {eff=1.20, heat=1.00, maxT=9, menuMax=9, ngj=2, alq99=1},
 }
+
+-- NGJ-MB modifiers against an emitter in `band` ("S" = search / acquisition, "X" = fire control).
+-- The ALQ-249 Mid Band covers the S/C band: there it resists ECCM better, holds longer and burns through
+-- later. X-band fire-control radars are covered by the ALQ-99 (high band) pods, so an NGJ-only loadout
+-- is slightly weaker against them.
+local function ngjMods(loadout, band)
+  local lo = LOADOUTS[loadout]
+  local ngj = (lo and lo.ngj) or 0
+  if ngj <= 0 then return {resistAdd=0.0, holdMul=1.0, burnMul=1.0} end
+  if band == "S" then
+    return {resistAdd=-math.min(0.08, 0.04 * ngj), holdMul=1.10, burnMul=0.80}
+  end
+  if (lo.alq99 or 0) == 0 then
+    return {resistAdd=0.05, holdMul=1.0, burnMul=1.0}
+  end
+  return {resistAdd=0.0, holdMul=1.0, burnMul=1.0}
+end
 
 local function powerMods(power)
   if power == "LOW" then
@@ -790,13 +828,29 @@ local function markPulsed(now, u, holdFor)
   return untilT
 end
 
+-- Back to OPEN FIRE at untilT, unless a later suppression (from any jammer) is still running.
+local function scheduleRelease(target, untilT)
+  timer.scheduleFunction(function(param, t)
+    local u = param
+    local k = targetKey(u)
+    local s = AEA.suppressed[k]
+    if s and s["until"] and s["until"] > t + 0.05 then return nil end
+    if unitExists(u) then
+      safeSetOpenFire(u)
+    end
+    AEA.suppressed[k] = nil
+    return nil
+  end, target, untilT)
+end
+
 local function scoreEmitter(jammerUnit, st, emitter)
   local jp = jammerUnit:getPoint()
   local ep = emitter:getPoint()
   local rangeNm = mToNm(dist2D(jp, ep))
 
   local tier = getEccmTierForUnit(emitter)
-  local burn = burnThroughNmForTier(tier)
+  local band = classifyBand(emitter)
+  local burn = burnThroughNmForTier(tier) * ngjMods(st.loadout, band).burnMul
   local loadEff = (LOADOUTS[st.loadout] or {eff=1.0}).eff
   local maxR = maxJamRangeNm(jp.y or 0, loadEff, st.power)
   if isShipUnit(emitter) then
@@ -817,7 +871,6 @@ local function scoreEmitter(jammerUnit, st, emitter)
     rangeScore = clamp(1.0 - (d / (maxR - burn)), 0.30, 1.0)
   end
 
-  local band = classifyBand(emitter)
   local bandMul = bandBiasMultiplier(st, band)
 
   local hdg = getHeadingDeg(jammerUnit)
@@ -853,11 +906,12 @@ local function pulseSuppression(now, jammerUnit, st, target, rangeNm)
 
   local pm = powerMods(st.power)
   local tm = targetCountMods(st.maxTargets)
+  local nm = ngjMods(st.loadout, tBand)
 
-  local holdMin = base.holdMin * pm.holdMul * tm.holdMul
-  local holdMax = base.holdMax * pm.holdMul * tm.holdMul
+  local holdMin = base.holdMin * pm.holdMul * tm.holdMul * nm.holdMul
+  local holdMax = base.holdMax * pm.holdMul * tm.holdMul * nm.holdMul
 
-  local burn = burnThroughNmForTier(tier)
+  local burn = burnThroughNmForTier(tier) * nm.burnMul
   local loadEff = (LOADOUTS[st.loadout] or {eff=1.0}).eff
   local maxR = maxJamRangeNm((jammerUnit:getPoint().y or 0), loadEff, st.power)
 
@@ -869,7 +923,7 @@ local function pulseSuppression(now, jammerUnit, st, target, rangeNm)
   local bandMatch = (selBand ~= nil) and (tBand == selBand)
   local bandMismatch = (selBand ~= nil) and (tBand ~= selBand)
 
-  local resist = clamp(base.resist + pm.resistAdd + tm.resistAdd + (1 - t01) * 0.25, 0.05, 0.95)
+  local resist = clamp(base.resist + pm.resistAdd + tm.resistAdd + nm.resistAdd + (1 - t01) * 0.25, 0.05, 0.95)
   if bandMatch then
     resist = clamp(resist - 0.10, 0, 0.95)
   elseif bandMismatch then
@@ -922,20 +976,7 @@ local function pulseSuppression(now, jammerUnit, st, target, rangeNm)
   st.stats = st.stats or {}
   st.stats.suppress = (st.stats.suppress or 0) + 1
 
-  local untilT = markPulsed(now, target, hold)
-
-  timer.scheduleFunction(function(param, t)
-    local u = param
-    local k = targetKey(u)
-    local s = AEA.suppressed[k]
-    -- only release if no later suppression (from any jammer) is still running
-    if s and s["until"] and s["until"] > t + 0.05 then return nil end
-    if unitExists(u) then
-      safeSetOpenFire(u)
-    end
-    AEA.suppressed[k] = nil
-    return nil
-  end, target, untilT)
+  scheduleRelease(target, markPulsed(now, target, hold))
 end
 
 local function runJamming(now, jammerUnit, st)
@@ -1046,7 +1087,7 @@ end
 local function missileKey(w) return tostring(w) end
 
 local function anyJammers()
-  return next(AEA.jammers) ~= nil
+  return next(AEA.jammers) ~= nil or next(AEA.selfProtect) ~= nil
 end
 
 -- Friendly (to the jammer) aircraft within the protected radius of the jammer.
@@ -1256,6 +1297,10 @@ local function updateHeat(now, jammerUnit, st)
     ["1xALQ99"]          = {LOW=0.10,  NORM=0.20,  HIGH=0.30},
     ["2xALQ99"]          = {LOW=0.02,  NORM=0.06,  HIGH=0.10},
     ["3xALQ99"]          = {LOW=0.00,  NORM=0.045, HIGH=0.075},
+    -- Retribution: single ALQ-249 fits, interpolated between the upstream entries
+    ["1xALQ249"]         = {LOW=0.05,  NORM=0.12,  HIGH=0.18},
+    ["1xALQ249_1xALQ99"] = {LOW=0.01,  NORM=0.05,  HIGH=0.08},
+    ["1xALQ249_2xALQ99"] = {LOW=0.00,  NORM=0.045, HIGH=0.07},
     ["2xALQ249"]         = {LOW=-0.005, NORM=0.0375, HIGH=0.05},
     ["2xALQ249_1xALQ99"] = {LOW=0.005, NORM=0.05,  HIGH=0.07},
   }
@@ -1267,7 +1312,9 @@ local function updateHeat(now, jammerUnit, st)
   if st.xmit then
     rate = (r[p] or r.NORM or 0.06)
 
-    if st.maxTargets == 6 then
+    if (st.maxTargets or 0) >= 9 then
+      rate = rate * 1.20
+    elseif st.maxTargets == 6 then
       rate = rate * 1.10
     elseif st.maxTargets == 2 then
       rate = rate * 0.95
@@ -1313,9 +1360,8 @@ local function updateHeat(now, jammerUnit, st)
 end
 
 local function maxTargetsForLoadout(loadout)
-  if loadout == "1xALQ99" then return 2 end
-  if loadout == "3xALQ99" or loadout == "2xALQ249_1xALQ99" then return 6 end
-  return 4
+  local lo = LOADOUTS[loadout]
+  return (lo and lo.maxT) or 4
 end
 
 local function ensureJammerState(name)
@@ -1416,8 +1462,15 @@ local function buildMenusForUnit(unit, st)
   end)
 
   local mt = missionCommands.addSubMenuForGroup(gid, "MAX TARGETS", pri)
-  for _,n in ipairs({2, 4, 6}) do
+  -- Retribution: 9 targets for NGJ (multi-beam AESA) loadouts; the choice is re-checked against the
+  -- loadout selected at the time the option is picked.
+  for _,n in ipairs({2, 4, 6, 9}) do
     missionCommands.addCommandForGroup(gid, tostring(n), mt, function()
+      local lo = LOADOUTS[st.loadout]
+      if n > ((lo and lo.menuMax) or 6) then
+        msgToUnit(unit, "[AEA] MAX TARGETS 9 needs 2x ALQ-249 or 1x ALQ-249 + 2x ALQ-99", 4)
+        return
+      end
       st.maxTargets = n
       emitConfirm(st, unit, "[AEA] MAX TARGETS: " .. tostring(n))
       pushStatus(st, unit)
@@ -1448,12 +1501,17 @@ local function buildMenusForUnit(unit, st)
     {"1x ALQ-99", "1xALQ99"},
     {"2x ALQ-99", "2xALQ99"},
     {"3x ALQ-99", "3xALQ99"},
+    {"1x ALQ-249", "1xALQ249"},
+    {"1x ALQ-249, 1x ALQ-99", "1xALQ249_1xALQ99"},
+    {"1x ALQ-249, 2x ALQ-99", "1xALQ249_2xALQ99"},
     {"2x ALQ-249", "2xALQ249"},
     {"2x ALQ-249, 1x ALQ-99", "2xALQ249_1xALQ99"},
   }
   for _,opt_ in ipairs(loadoutOptions) do
     missionCommands.addCommandForGroup(gid, opt_[1], lo, function()
       st.loadout = opt_[2]
+      local menuMax = LOADOUTS[st.loadout].menuMax or 6
+      if (st.maxTargets or 0) > menuMax then st.maxTargets = menuMax end
       emitConfirm(st, unit, "[AEA] LOADOUT: " .. opt_[1])
       pushStatus(st, unit)
     end)
@@ -1483,6 +1541,7 @@ function AEA_RegisterJammer(unitName, cfg)
 
   local st = ensureJammerState(unitName)
   st.ai = ai
+  AEA.selfProtect[unitName] = nil   -- the AEA jammer covers its own aircraft
   if cfg.loadout and LOADOUTS[cfg.loadout] then
     st.loadout = cfg.loadout
   elseif cfg.loadout then
@@ -1631,6 +1690,236 @@ local function runAIController(now, unit, st)
 end
 
 
+-- SELF-PROTECTION JAMMERS (Retribution)
+--
+-- Defensive ECM pods (ALQ-131, ALQ-184, ALQ-164, L005, Sky Shadow, ...) and internal self-protection suites
+-- only protect the aircraft carrying them. They run automatically (like a real DECM in AUTO):
+--   * Track break: when an enemy radar is tracking THIS aircraft and the aircraft is outside the (longer)
+--     self-protection burn-through range, deception jamming can briefly break the track (short WEAPON HOLD
+--     on that radar's group / on the enemy fighter). Lower ERP than the AEA jammer: shorter holds, more ECCM
+--     resistance, burn-through further out.
+--   * Missile defeat: one roll per enemy active / semi-active radar missile aimed at THIS aircraft once it is
+--     within spj_missile_nm.
+-- There is no stand-off jamming, no search radar jamming and no protection of other aircraft.
+-- DCS limitation: SAM ROE is set per group, so a track break also pauses that SAM group's other engagements.
+
+local SPJ_GEN = {
+  [1] = {resistAdd=0.20, holdMul=0.5, missileMul=0.6},  -- before 1985: analogue noise / deception
+  [2] = {resistAdd=0.12, holdMul=0.6, missileMul=1.0},  -- 1985-1995
+  [3] = {resistAdd=0.05, holdMul=0.7, missileMul=1.4},  -- after 1995 / internal suites (DRFM)
+}
+local SPJ_BURN_MUL = 1.6        -- self-protection burn-through range vs. the AEA burn-through range
+local SPJ_TRACKER_COOLDOWN = 8  -- s between track breaks on the same radar
+local SPJ_AIR_SCAN_NM = 60      -- enemy fighters considered as trackers
+
+local function scanAir(side)
+  if not side then return {} end
+  local now = timer.getTime()
+  local cache = AEA.airCache[side]
+  if cache and (now - cache.t) < 2.0 then return cache.units end
+  local units = {}
+  local ok, groups = pcall(function() return coalition.getGroups(side, Group.Category.AIRPLANE) end)
+  if ok and groups then
+    for _,g in ipairs(groups) do
+      local okU, us = pcall(function() return g:getUnits() end)
+      if okU and us then
+        for _,u in ipairs(us) do
+          if unitExists(u) and (not isPlayerUnit(u)) and hasRadar(u) then units[#units+1] = u end
+        end
+      end
+    end
+  end
+  AEA.airCache[side] = {t=now, units=units}
+  return units
+end
+
+local function isSameObject(a, b)
+  if not a or not b then return false end
+  if a == b then return true end
+  local na, nb = safeName(a), safeName(b)
+  return na ~= "?" and na == nb
+end
+
+-- Enemy radars currently tracking `unit`: list of {unit=, air=bool, rangeNm=}
+local function spjTrackers(unit, sp)
+  local up = unit:getPoint()
+  local side = enemySide(sp.coalition)
+  local out = {}
+  for _,e in ipairs(scanEmitters(side).threat) do
+    if unitExists(e) then
+      local okP, ep = pcall(function() return e:getPoint() end)
+      if okP and ep then
+        local rng = mToNm(dist2D(up, ep))
+        local det = rwrDetectNm(up.y, e)
+        if rng <= det then
+          local active, tracked = radarState(e)
+          if active and isSameObject(tracked, unit) then
+            out[#out+1] = {unit=e, air=false, rangeNm=rng}
+          end
+        end
+      end
+    end
+  end
+  for _,a in ipairs(scanAir(side)) do
+    local okP, ap = pcall(function() return a:getPoint() end)
+    if okP and ap then
+      local rng = mToNm(dist2D(up, ap))
+      if rng <= SPJ_AIR_SCAN_NM then
+        local active, tracked = radarState(a)
+        if active and isSameObject(tracked, unit) then
+          out[#out+1] = {unit=a, air=true, rangeNm=rng}
+        end
+      end
+    end
+  end
+  return out
+end
+
+local function spjTrackBreak(now, unit, sp, tr)
+  local g = SPJ_GEN[sp.gen] or SPJ_GEN[2]
+  local e = tr.unit
+  local key = unitKey(e)
+  if now < (sp.cooldown[key] or 0) then return end
+
+  if tr.air then
+    local uname = safeName(e)
+    if now < (AEA.airCooldown[uname] or 0) then return end
+    -- airborne fire-control radars: tier 1 ECCM, burn-through 8 NM
+    local burn = 8
+    if tr.rangeNm <= burn then return end
+    local t01 = clamp((tr.rangeNm - burn) / burn, 0, 1)
+    local resist = clamp(TIER[1].resist + g.resistAdd + (1 - t01) * 0.25, 0.05, 0.95)
+    local roll = _rand()
+    if roll < resist then
+      aeaLogV("%s: SPJ ECCM RESIST %s (air) roll=%.2f<thr=%.2f rng=%.1fNM", sp.unitName, safeTypeName(e), roll, resist, tr.rangeNm)
+      return
+    end
+    if safeSetAirHold(e) then
+      -- AEA air effect hold (2-4 s), scaled by generation relative to gen 2
+      local hold = clamp(randf(2.0, 4.0) * g.holdMul / SPJ_GEN[2].holdMul, 2.0, 6.0)
+      timer.scheduleFunction(function(param, t)
+        if unitExists(param) then safeSetAirOpen(param) end
+        return nil
+      end, e, now + hold)
+      AEA.airCooldown[uname] = now + AIR_EVENT_COOLDOWN
+      sp.cooldown[key] = now + SPJ_TRACKER_COOLDOWN
+      sp.stats.breaks = sp.stats.breaks + 1
+      if isDebug(sp) then
+        dbg(sp, unit, string.format("SPJ TRACK BREAK %s (%s, air) hold=%.1fs rng=%.1fNM", uname, safeTypeName(e), hold, tr.rangeNm), 3)
+      end
+    end
+    return
+  end
+
+  if not shouldPulseTarget(now, e) then return end
+  local tier = getEccmTierForUnit(e)
+  local base = TIER[tier]
+  if not base then return end
+  local burn = burnThroughNmForTier(tier) * SPJ_BURN_MUL
+  if tr.rangeNm <= burn then
+    if isDebugV(sp) then
+      dbgThrottle(sp, unit, "spjburn:" .. key, 10.0, string.format("SPJ BURNED THROUGH by %s (%s) rng=%.1fNM <= %.1fNM",
+        safeTypeName(e), safeGroupName(e), tr.rangeNm, burn))
+    end
+    return
+  end
+  local t01 = clamp((tr.rangeNm - burn) / burn, 0, 1)
+  local resist = clamp(base.resist + g.resistAdd + (1 - t01) * 0.25, 0.05, 0.95)
+  local roll = _rand()
+  if roll < resist then
+    if isDebugV(sp) then
+      dbgThrottle(sp, unit, "spjres:" .. key, 4.0, string.format("SPJ ECCM RESIST %s (%s) roll=%.2f<thr=%.2f tier=%d rng=%.1fNM",
+        safeTypeName(e), safeGroupName(e), roll, resist, tier, tr.rangeNm))
+    end
+    return
+  end
+  if not safeSetWeaponHold(e) then return end
+  local hold = clamp(randf(base.holdMin, base.holdMax) * g.holdMul, 2.0, 6.0)
+  scheduleRelease(e, markPulsed(now, e, hold))
+  sp.cooldown[key] = now + SPJ_TRACKER_COOLDOWN
+  sp.stats.breaks = sp.stats.breaks + 1
+  if isDebug(sp) then
+    dbg(sp, unit, string.format("SPJ TRACK BREAK %s (%s) tier=%d hold=%.1fs rng=%.1fNM",
+      safeTypeName(e), safeGroupName(e), tier, hold, tr.rangeNm), 3)
+  end
+end
+
+local function spjMissileDefeat(now, unit, sp)
+  local g = SPJ_GEN[sp.gen] or SPJ_GEN[2]
+  local up = unit:getPoint()
+  local rangeM = nmToM(opt("spj_missile_nm"))
+  local chance = clamp(opt("spj_missile_chance") * g.missileMul, 0, 1)
+  for key, m in pairs(AEA.trackedMissiles) do
+    if m.side ~= sp.coalition and not AEA.missileRolls[key] and isSameObject(m.target, unit) and unitExists(m.weapon) then
+      local okW, wp = pcall(function() return m.weapon:getPoint() end)
+      if okW and wp and dist2D(up, wp) <= rangeM then
+        AEA.missileRolls[key] = true
+        local roll = _rand()
+        local hit = roll <= chance
+        if isDebug(sp) then
+          dbg(sp, unit, string.format("SPJ MSL ROLL %s (from %s) rng=%.1fNM roll=%.2f thr=%.2f -> %s", m.typeName, m.launcher,
+            mToNm(dist2D(up, wp)), roll, chance, hit and "DEFEATED" or "not defeated"), 3)
+        end
+        if hit then
+          sp.stats.missiles = sp.stats.missiles + 1
+          scheduleMissileKill(m.weapon, now)
+        end
+      end
+    end
+  end
+end
+
+local function updateSelfProtect(now, unit, sp)
+  if now < sp.nextTick then return end
+  sp.nextTick = now + EA_TICK_SEC
+
+  local trackers = spjTrackers(unit, sp)
+  if #trackers > 0 then
+    if not sp.active then
+      sp.active = true
+      local t = trackers[1].unit
+      dbg(sp, unit, string.format("SPJ ON - tracked by %s (%s)%s", safeTypeName(t), safeGroupName(t),
+        #trackers > 1 and string.format(" +%d more", #trackers - 1) or ""))
+    end
+    for _,tr in ipairs(trackers) do spjTrackBreak(now, unit, sp, tr) end
+  elseif sp.active then
+    sp.active = false
+    dbg(sp, unit, "SPJ OFF - no longer tracked")
+  end
+
+  spjMissileDefeat(now, unit, sp)
+end
+
+-- Register a self-protection jammer.
+--   cfg.gen : 1 / 2 / 3 (pod generation, see SPJ_GEN)
+--   cfg.pod : pod name (logging only)
+--   cfg.ai  : true for AI aircraft
+function AEA_RegisterSelfProtect(unitName, cfg)
+  if type(unitName) ~= "string" then return end
+  cfg = cfg or {}
+  if not opt("spj_enabled") then
+    aeaLog("%s: self-protection jammers disabled - not registered", unitName)
+    return
+  end
+  if (not cfg.ai) and not opt("spj_players") then
+    aeaLog("%s: self-protection for players disabled - not registered", unitName)
+    return
+  end
+  if AEA.jammers[unitName] then
+    aeaLog("%s: already an AEA jammer - self-protection not registered", unitName)
+    return
+  end
+  local gen = tonumber(cfg.gen) or 2
+  if not SPJ_GEN[gen] then gen = 2 end
+  AEA.selfProtect[unitName] = {
+    unitName = unitName, gen = gen, pod = tostring(cfg.pod or "ECM"), ai = cfg.ai and true or false,
+    nextTick = 0, cooldown = {}, stats = {breaks=0, missiles=0}, active = false,
+  }
+  aeaLog("%s: registered self-protection (%s) pod=%s gen=%d", unitName, cfg.ai and "AI" or "player",
+    tostring(cfg.pod or "ECM"), gen)
+end
+
+
 -- MAIN LOOP
 
 local nextPrefixScan = 0
@@ -1737,6 +2026,23 @@ local function updateAll(_, now)
       end
     end
 
+    for uname, sp in pairs(AEA.selfProtect) do
+      local u = Unit.getByName(uname)
+      if unitExists(u) then
+        if not sp.alive then
+          sp.alive = true
+          pcall(function() sp.coalition = u:getCoalition() end)
+          aeaLog("%s: self-protection active (%s, coalition %s)", uname, safeTypeName(u), tostring(sp.coalition))
+        end
+        updateSelfProtect(now, u, sp)
+      elseif sp.alive then
+        sp.alive = false
+        sp.active = false
+        aeaLog("%s: self-protected aircraft no longer exists (track breaks=%d, missiles defeated=%d)",
+          uname, sp.stats.breaks, sp.stats.missiles)
+      end
+    end
+
     cleanupMissiles()
   end)
   if not ok then
@@ -1745,6 +2051,9 @@ local function updateAll(_, now)
 
   return now + 1
 end
+
+-- read-only access for tests / debugging
+AEA_Internals = {LOADOUTS = LOADOUTS, ngjMods = ngjMods, SPJ_GEN = SPJ_GEN, state = AEA}
 
 timer.scheduleFunction(updateAll, nil, timer.getTime() + 1)
 env.info("[EWS3] EA-18G AEA script loaded (EW Script 3.0)")

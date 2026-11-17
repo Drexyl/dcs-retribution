@@ -63,6 +63,35 @@
             "defaultValue": true
         },
         {
+            "nameInUI": "Self-protection jammers (ALQ-131/184, L005, ... pods)",
+            "mnemonic": "spj_enabled",
+            "defaultValue": true
+        },
+        {
+            "nameInUI": "Self-protection: include internal ECM (F/A-18, F-35)",
+            "mnemonic": "spj_internal_ecm",
+            "defaultValue": true
+        },
+        {
+            "nameInUI": "Self-protection for player aircraft",
+            "mnemonic": "spj_players",
+            "defaultValue": true
+        },
+        {
+            "nameInUI": "Self-protection missile defeat chance (0-1, scaled by pod age)",
+            "mnemonic": "spj_missile_chance",
+            "minimumValue": 0.0,
+            "maximumValue": 1.0,
+            "defaultValue": 0.25
+        },
+        {
+            "nameInUI": "Self-protection missile defeat range (NM)",
+            "mnemonic": "spj_missile_nm",
+            "minimumValue": 1,
+            "maximumValue": 15,
+            "defaultValue": 5
+        },
+        {
             "nameInUI": "DEBUG - write to dcs.log",
             "mnemonic": "DEBUG_LOG",
             "defaultValue": false

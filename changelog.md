@@ -12,7 +12,7 @@
 * **[Layouts]** Add signature to layouts' binary file for automatic reloading of updated layouts.
 * **[Modding]** Add support for Su-35S mod (v2.0.27b)
 * **[Plugins]** Update EW Script to version 2.1
-* **[Plugins]** New EW Script 3.0 plugin (Timberwolf's EA-18G AEA script): ALQ-99/ALQ-249 jammers for players (auto-registered F10 AEA menu) and AI. AI jammers transmit inside the JOIN-SPLIT / racetrack window while the package is lit up or under radar-missile attack. Only affects enemy radars, aircraft and missiles. Do not enable together with EW Script 2.1.
+* **[Plugins]** New EW Script 3.0 plugin (Timberwolf's EA-18G AEA script): ALQ-99/ALQ-249 jammers for players (auto-registered F10 AEA menu) and AI. AI jammers transmit inside the JOIN-SPLIT / racetrack window while the package is lit up or under radar-missile attack. ALQ-249 (NGJ-MB) loadouts jam up to 9 groups with mid-band bonuses. Self-protection ECM pods (and optionally internal ECM) break radar tracks on, and defeat radar missiles aimed at, their own aircraft. Only affects enemy radars, aircraft and missiles. Do not enable together with EW Script 2.1.
 * **[Options]** New option to spawn TACAN beacons at captured airfields
 * **[UX]** Show an "End of Mission Detected, processing Mission Data" busy dialog while turn results are processed, so the wait is not mistaken for a missed detection
 * **[Map]** Hovering a SAM threat or detection ring highlights its emitter — and hovering an emitter highlights its ring — making it easy to tell which site a ring belongs to. Can be disabled from the map's layer control.
