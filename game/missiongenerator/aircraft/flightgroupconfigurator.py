@@ -226,6 +226,8 @@ class FlightGroupConfigurator:
         settings = self.flight.coalition.game.settings
         if not ewscript3.ewscript3_enabled(settings):
             return
+        if not ewscript3.ewscript3_side_enabled(self.flight, settings):
+            return
         loadout = ewscript3.jammer_loadout_key(member, self.flight)
         if loadout is None:
             self.handle_ewscript3_self_protect(member, unit)

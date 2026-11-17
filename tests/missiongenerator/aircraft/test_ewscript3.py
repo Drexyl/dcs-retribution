@@ -8,6 +8,7 @@ import pytest
 from game.ato.flightwaypointtype import FlightWaypointType
 from game.data.weapons import Weapon
 from game.missiongenerator.aircraft import ewscript3
+from game.theater.player import Player
 
 ALQ99_HI = "{SUPERHORNET_PYLON_03_MB_ALQ_99_HI_BAND}"
 ALQ99_LO = "{SUPERHORNET_PYLON_06_CN_ANALQ_99_LO_BAND}"
@@ -32,9 +33,11 @@ def _flight(
     built_in: bool = False,
     waypoint_types: tuple[Any, ...] = (),
     built_in_ecm: bool = False,
+    side: Player = Player.BLUE,
 ) -> Any:
     waypoints = [SimpleNamespace(waypoint_type=t) for t in waypoint_types]
     return SimpleNamespace(
+        blue=side,
         squadron=SimpleNamespace(
             aircraft=SimpleNamespace(
                 has_built_in_jamming=built_in, has_built_in_ecm=built_in_ecm
@@ -184,6 +187,7 @@ def _settings(
     spj: bool = True,
     spj_players: bool = True,
     internal_ecm: bool = True,
+    opfor: bool = False,
 ) -> Any:
     from game.settings import Settings
 
@@ -194,11 +198,15 @@ def _settings(
     settings.set_plugin_option("EWScript3.spj_enabled", spj)
     settings.set_plugin_option("EWScript3.spj_players", spj_players)
     settings.set_plugin_option("EWScript3.spj_internal_ecm", internal_ecm)
+    settings.set_plugin_option("EWScript3.opfor_enabled", opfor)
     return settings
 
 
 def _configurator(
-    settings: Any, is_player: bool, pods: Optional[list[Optional[str]]] = None
+    settings: Any,
+    is_player: bool,
+    pods: Optional[list[Optional[str]]] = None,
+    side: Player = Player.BLUE,
 ) -> tuple[Any, Any, Any, Any]:
     from dcs import Mission
 
@@ -206,7 +214,7 @@ def _configurator(
         FlightGroupConfigurator,
     )
 
-    flight = _flight(waypoint_types=(FlightWaypointType.JOIN,))
+    flight = _flight(waypoint_types=(FlightWaypointType.JOIN,), side=side)
     flight.coalition = SimpleNamespace(game=SimpleNamespace(settings=settings))
     configurator = FlightGroupConfigurator.__new__(FlightGroupConfigurator)
     configurator.flight = flight
@@ -288,6 +296,79 @@ def test_configurator_self_protection_options(
     )
     configurator.handle_ewscript3(member, unit)
     assert _scripts(mission) == []
+
+
+@pytest.mark.parametrize("pods", [[ALQ99_HI, ALQ99_LO, ALQ99_HI], [ALQ184]])
+def test_configurator_skips_opfor_by_default(pods: list[Optional[str]]) -> None:
+    configurator, member, unit, mission = _configurator(
+        _settings(), False, pods, side=Player.RED
+    )
+    configurator.handle_ewscript3(member, unit)
+    assert _scripts(mission) == []
+
+
+@pytest.mark.parametrize(
+    "pods,expected",
+    [
+        ([ALQ99_HI, ALQ99_LO, ALQ99_HI], "AEA_RegisterJammer"),
+        ([ALQ184], "AEA_RegisterSelfProtect"),
+    ],
+)
+def test_configurator_registers_opfor_when_enabled(
+    pods: list[Optional[str]], expected: str
+) -> None:
+    configurator, member, unit, mission = _configurator(
+        _settings(opfor=True), False, pods, side=Player.RED
+    )
+    configurator.handle_ewscript3(member, unit)
+    scripts = _scripts(mission)
+    assert len(scripts) == 1
+    assert expected in scripts[0]
+
+
+@pytest.mark.parametrize(
+    "settings,pods",
+    [
+        (dict(opfor=True, ai=False), [ALQ99_HI, ALQ99_LO, ALQ99_HI]),
+        (dict(opfor=True, spj=False), [ALQ184]),
+    ],
+)
+def test_opfor_uses_ownfor_options(
+    settings: dict[str, bool], pods: list[Optional[str]]
+) -> None:
+    configurator, member, unit, mission = _configurator(
+        _settings(**settings), False, pods, side=Player.RED
+    )
+    configurator.handle_ewscript3(member, unit)
+    assert _scripts(mission) == []
+
+
+def test_waypoint_window_skips_opfor_by_default() -> None:
+    from dcs import Point
+    from dcs.point import MovingPoint
+    from dcs.task import RunScript
+    from dcs.terrain import Caucasus
+
+    from game.missiongenerator.aircraft.waypoints.pydcswaypointbuilder import (
+        PydcsWaypointBuilder,
+    )
+
+    for opfor, count in ((False, 0), (True, 1)):
+        flight = _flight(side=Player.RED)
+        flight.coalition = SimpleNamespace(
+            game=SimpleNamespace(settings=_settings(opfor=opfor))
+        )
+        jammer = _member([ALQ249, None, ALQ249])
+        jammer.is_player = False
+        flight.iter_members = lambda: iter([jammer])
+        builder = PydcsWaypointBuilder.__new__(PydcsWaypointBuilder)
+        builder.flight = flight
+        builder.group = SimpleNamespace(  # type: ignore[assignment]
+            units=[SimpleNamespace(name="Red-1")]
+        )
+        waypoint = MovingPoint(Point(0, 0, Caucasus()))
+        builder.ewscript3_window(waypoint, True)
+        assert len([t for t in waypoint.tasks if isinstance(t, RunScript)]) == count
 
 
 def test_waypoint_window_only_for_ai_jammers() -> None:

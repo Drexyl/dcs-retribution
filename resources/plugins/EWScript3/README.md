@@ -10,6 +10,13 @@ radar "blinks" on enemy AI fighters.
 > **Do not enable this together with EW Script 2.1 (`ewrj`).** Both scripts act on SAM ROE and incoming
 > missiles independently. If both are enabled, Retribution logs a warning and DCS shows one at mission start.
 
+## OwnFor and OpFor
+
+By default only **OwnFor (Blue)** aircraft are registered, as AEA or self-protection jammers. Switch on
+**Enable jamming for OpFor (Red) aircraft** to register Red aircraft as well. Red jammers then use exactly the
+same options as Blue (AI, players, self-protection, internal ECM, chances and ranges) and act against Blue
+SAMs, fighters and missiles.
+
 ## Which aircraft are jammers
 
 Aircraft carrying **offensive (stand-off / escort) jamming pods** are registered as AEA jammers:
@@ -99,6 +106,7 @@ so the jammer is not giving away its position (home-on-jam) or overheating the p
 
 | Option | Default | Notes |
 |---|---|---|
+| Enable jamming for OpFor (Red) aircraft | off | Red uses the same options as Blue |
 | Player AEA menu | on | |
 | Enable AI jammers | on | |
 | AI: only jam inside mission window | on | off = reactive at any time |

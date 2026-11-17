@@ -6,6 +6,8 @@ The Lua side lives in resources/plugins/EWScript3. Only aircraft carrying offens
 self-protection pods (``WeaponType.JAMMER``) or, optionally, internal ECM
 (``has_built_in_ecm``) are registered as self-protection jammers, which only protect
 the carrier.
+
+OpFor (Red) aircraft are only registered when the ``opfor_enabled`` option is on.
 """
 
 from __future__ import annotations
@@ -35,6 +37,16 @@ def ewscript3_option(settings: Settings, key: str) -> Any:
         return settings.plugin_option(f"{PLUGIN_ID}.{key}")
     except KeyError:
         return None
+
+
+def ewscript3_side_enabled(flight: Flight, settings: Settings) -> bool:
+    """OwnFor (Blue) flights always jam; OpFor (Red) flights only with ``opfor_enabled``.
+
+    All other options apply to both sides alike.
+    """
+    if flight.blue.is_blue:
+        return True
+    return bool(ewscript3_option(settings, "opfor_enabled"))
 
 
 def count_offensive_jammer_pods(member: FlightMember) -> tuple[int, int]:
