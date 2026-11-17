@@ -3,6 +3,11 @@
     "defaultValue": false,
     "specificOptions": [
         {
+            "nameInUI": "Enable jamming for OpFor (Red) aircraft",
+            "mnemonic": "opfor_enabled",
+            "defaultValue": false
+        },
+        {
             "nameInUI": "Player AEA menu (ALQ-99/ALQ-249 slots)",
             "mnemonic": "players_enabled",
             "defaultValue": true

@@ -207,6 +207,8 @@ class PydcsWaypointBuilder:
         settings = self.flight.coalition.game.settings
         if not ewscript3.ewscript3_enabled(settings):
             return
+        if not ewscript3.ewscript3_side_enabled(self.flight, settings):
+            return
         if not ewscript3.ewscript3_option(settings, "ai_enabled"):
             return
         for unit, member in zip(self.group.units, self.flight.iter_members()):
