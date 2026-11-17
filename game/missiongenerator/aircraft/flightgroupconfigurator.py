@@ -228,6 +228,7 @@ class FlightGroupConfigurator:
             return
         loadout = ewscript3.jammer_loadout_key(member, self.flight)
         if loadout is None:
+            self.handle_ewscript3_self_protect(member, unit)
             return
         ai = not member.is_player
         if ai and not ewscript3.ewscript3_option(settings, "ai_enabled"):
@@ -244,6 +245,31 @@ class FlightGroupConfigurator:
                         ai=ai,
                         gated=ewscript3.flight_has_jamming_window(self.flight),
                         max_targets=ewscript3.jammer_max_targets(member, self.flight),
+                    )
+                )
+            )
+        )
+        self.mission.triggerrules.triggers.append(trigger)
+
+    def handle_ewscript3_self_protect(
+        self, member: FlightMember, unit: FlyingUnit
+    ) -> None:
+        # EW Script 3.0: self-protection jammers (defensive ECM pods / internal ECM)
+        settings = self.flight.coalition.game.settings
+        if not ewscript3.ewscript3_option(settings, "spj_enabled"):
+            return
+        if member.is_player and not ewscript3.ewscript3_option(settings, "spj_players"):
+            return
+        spj = ewscript3.self_protection_jammer(member, self.flight, settings)
+        if spj is None:
+            return
+        gen, pod = spj
+        trigger = TriggerStart(comment=f"EWScript3-SPJ-{unit.name}")
+        trigger.add_action(
+            DoScript(
+                String(
+                    ewscript3.register_self_protect_script(
+                        unit.name, gen, pod, ai=not member.is_player
                     )
                 )
             )

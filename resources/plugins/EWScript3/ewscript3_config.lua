@@ -13,6 +13,7 @@ if dcsRetribution and dcsRetribution.plugins and dcsRetribution.plugins.EWScript
         "players_enabled", "ai_enabled", "ai_window_gating", "ai_jam_search",
         "ai_protect_radius_nm", "ai_hold_sec", "range_multiplier",
         "missile_disrupt_chance", "missile_disrupt_nm", "air_effects",
+        "spj_enabled", "spj_internal_ecm", "spj_players", "spj_missile_chance", "spj_missile_nm",
         "DEBUG_LOG", "DEBUG_MESSAGES", "DEBUG_VERBOSE",
     }
     for _, k in ipairs(keys) do
