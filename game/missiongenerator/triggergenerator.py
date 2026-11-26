@@ -192,6 +192,18 @@ class TriggerGenerator:
     ) -> TriggerCondition:
         """Helper method to create a single capture trigger with the given parameters."""
         trigger = TriggerCondition(Event.NoEvent, "Capture Trigger")
+        # DCS evaluates the conditions of a trigger in order, once per second, and
+        # stops at the first one that is false. The flag check is a table lookup
+        # while the zone checks walk every ground unit of a coalition, so the flag
+        # goes first: of each capture/recapture pair only the trigger whose flag
+        # state matches ever reaches the zone checks.
+        if flag_condition_true:
+            trigger.add_condition(FlagIsTrue(flag=flag))
+            trigger.add_action(ClearFlag(flag=flag))
+        else:
+            trigger.add_condition(FlagIsFalse(flag=flag))
+            trigger.add_action(SetFlag(flag=flag))
+
         trigger.add_condition(
             AllOfCoalitionOutsideZone(
                 losing_coalition, trigger_zone_id, unit_type="GROUND"
@@ -202,13 +214,6 @@ class TriggerGenerator:
                 capturing_coalition, trigger_zone_id, unit_type="GROUND"
             )
         )
-
-        if flag_condition_true:
-            trigger.add_condition(FlagIsTrue(flag=flag))
-            trigger.add_action(ClearFlag(flag=flag))
-        else:
-            trigger.add_condition(FlagIsFalse(flag=flag))
-            trigger.add_action(SetFlag(flag=flag))
 
         script_string = String(
             f'base_capture_events[#base_capture_events + 1] = "{cp.id}||{capturing_coalition_int}||{cp.full_name}"\ndirty_state = true'

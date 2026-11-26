@@ -924,11 +924,11 @@ function setOptions(optionsList)
 			dismountsOptions[key] = optionsList[key]		
 		end
 	end
-	trigger.action.outText(mist.utils.tableShow(dismountsOptions),25)
+	trigger.action.outText(UTILS.TableShow(dismountsOptions),25)
 end
 
 function georgify(origSquad)
-	local newSquad = mist.utils.deepCopy(origSquad)
+	local newSquad = UTILS.DeepCopy(origSquad)
 
 	for i=1,#newSquad do
 		if newSquad[i] == 'Soldier M4' then
@@ -950,7 +950,7 @@ local function replaceManpadsWithRiflemen(squad)
 	for i=1,#squad do
 		local rifleSoldierType = ''
 		if squad[i] == 'SA-18 Igla-S manpad' then
-			local riflemanTypeSeed = mist.random(3)			
+			local riflemanTypeSeed = math.random(3)			
 			if riflemanTypeSeed == 1 then
 				rifleSoldierType = 'Infantry AK'
 			elseif riflemanTypeSeed == 2 then
@@ -983,7 +983,6 @@ end
 
 
 local function checkForMarkers(hostVehicle)
-	--local markersForUnit = mist.marker.get(hostVehicle)
 	local markersForUnit = {}
 	--trigger.action.outText('markers check for vehichle: ' .. hostVehicle, 2)
 
@@ -1028,22 +1027,22 @@ end
 local function addWaypointToGroup(groupName,waypointsPos3)
 	local squadPath = {}
 	local groupDismounts = 'Dismounts_' .. groupName
-	squadPath[1] = mist.ground.buildWP(mist.getLeadPos(groupDismounts))
+	squadPath[1] = RetUtils.groundWaypoint(RetUtils.getLeadPos(groupDismounts))
 
-	local wpToAdd = mist.ground.buildWP(waypointsPos3[1].pos)
+	local wpToAdd = RetUtils.groundWaypoint(waypointsPos3[1].pos)
 	
 	table.insert(squadPath,wpToAdd)
-	mist.goRoute(groupDismounts,squadPath)
+	RetUtils.routeGroup(groupDismounts,squadPath)
 end
 
 local function addWaypointToVehicles(groupName,waypointVec2)
 	local squadPath = {}	
-	squadPath[1] = mist.ground.buildWP(mist.getLeadPos(groupName))
+	squadPath[1] = RetUtils.groundWaypoint(RetUtils.getLeadPos(groupName))
 
-	local wpToAdd = mist.ground.buildWP(waypointVec2)
+	local wpToAdd = RetUtils.groundWaypoint(waypointVec2)
 	
 	table.insert(squadPath,wpToAdd)
-	mist.goRoute(groupName,squadPath)
+	RetUtils.routeGroup(groupName,squadPath)
 end
 
 
@@ -1080,7 +1079,7 @@ local function randomizedSquadForTransport(transportType, squadType, countryID, 
 		troopNumber = transportCapacities[transportType]
 	end
 	if squadType == nil then
-		local squadTypeSeed = mist.random(3)
+		local squadTypeSeed = math.random(3)
 		if squadTypeSeed < 3 then
 			squadType = 'rifle'
 		else
@@ -1093,7 +1092,7 @@ local function randomizedSquadForTransport(transportType, squadType, countryID, 
 
 	if countryID == 0 or countryID == 1 or countryID == 16 or countryID == 18 or countryID == 19 or countryID == 68 or countryID == 81 then --east/Ru
 		manpadsSoldierType = 'SA-18 Igla-S manpad'
-		local riflemanTypeSeed = mist.random(3)
+		local riflemanTypeSeed = math.random(3)
 		if riflemanTypeSeed == 1 then
 			rifleSoldierType = 'Infantry AK'
 		elseif riflemanTypeSeed == 2 then
@@ -1102,7 +1101,7 @@ local function randomizedSquadForTransport(transportType, squadType, countryID, 
 			rifleSoldierType = 'Infantry AK ver3'
 		end
 	elseif  countryID == 17 then --Insurgent
-		local insManpadsTypeSeed = mist.random(2)
+		local insManpadsTypeSeed = math.random(2)
 		if insManpadsTypeSeed == 1 then
 			manpadsSoldierType = 'Igla manpad INS'
 		else
@@ -1177,8 +1176,8 @@ function assignWeaponTransports(hostGroup,cargoType)
 	end
 
 	--trigger.action.outText(templateType,15)
-	weaponTransportType = mist.utils.deepCopy(_G[templateType])
-	--trigger.action.outText(mist.utils.tableShow(weaponTransportType),15)
+	weaponTransportType = UTILS.DeepCopy(_G[templateType])
+	--trigger.action.outText(UTILS.TableShow(weaponTransportType),15)
 
 	for transportedItemType, transportedItemInfo in pairs(weaponTransportType) do
 		if dismountsOptions["WPNSitesAddMoreWPNToFreeVehicles"] == true and (transportedItemType ~= "RDR" and transportedItemType ~= "OPT") then
@@ -1245,12 +1244,12 @@ function assignWeaponTransports(hostGroup,cargoType)
 				elseif dismountsOptions["WPNSitesAddMoreWPNToFreeVehicles"] == true and #nonSensorCargoTypesInTemplate > 0 then --and (cargoInfo["CarrierVehicleNamePrefix"] ~= "RDR" or cargoInfo["CarrierVehicleNamePrefix"] ~= "OPT") then
 					if alreadyLoadedVehicles[unitName] == nil then
 						--first, let's decide whether we'll give this particular vehicle any cargo or not
-						local emptyOrFull = mist.random(1,10)
+						local emptyOrFull = math.random(1,10)
 						if emptyOrFull < 8 then
 							break
 						end
 						--now we can go about giving this particular vehicle some random goodies, consideration for future: make vehicle type suitability check for the cargo!!
-						local seed = mist.random(1,#nonSensorCargoTypesInTemplate)
+						local seed = math.random(1,#nonSensorCargoTypesInTemplate)
 						itemToAdd = {
 							['TransportingVehicleName'] = unitName,
 							['TransportedItem'] = nonSensorCargoTypesInTemplate[seed]['SpawnedUnitType'],
@@ -1278,7 +1277,7 @@ function assignWeaponTransports(hostGroup,cargoType)
 	table.insert(weaponTransports,weaponTransportGroupToAdd)
 
 	--if #weaponTransports > 1 then
-		--trigger.action.outText(mist.utils.tableShow(weaponTransports),15)
+		--trigger.action.outText(UTILS.TableShow(weaponTransports),15)
 	--end
 end
 
@@ -1290,7 +1289,7 @@ function determineRandomSquad(hostVehicle)
 	if countryId == 0 or countryId == 1 or countryId == 16 or countryId == 18 or countryId == 19 or countryId == 68 or countryId == 81 or countryId == 17 then --East
 		if vehichleType == 'BTR-80' or vehichleType == 'BMP-2' then
 			--randomize a number, and determine squad type corresponding to nation and number for this vehicle type, in this case, 7 men squads
-			squadTypeSeed = mist.random(7) --1 to 5 = rifle squad, 5 and 6 = rifle squad with 1 manpads, 7 = air defense squad with manpads cmd+2 manpads+4 riflemen			
+			squadTypeSeed = math.random(7) --1 to 5 = rifle squad, 5 and 6 = rifle squad with 1 manpads, 7 = air defense squad with manpads cmd+2 manpads+4 riflemen			
 			if countryId == 17 then --Insurgents
 				if squadTypeSeed < 3 then
 					initializeTransport(hostVehicle,insRifleSquadBTR_BMP2)
@@ -1304,7 +1303,7 @@ function determineRandomSquad(hostVehicle)
 					initializeTransport(hostVehicle,insSquadAntiAirBTR_BMP2)
 				end
 			elseif countryId == 81 then --CJTF Red, dismounts can either be of Russian troops type, or Insurgent type
-				cjtfRedTroopTypeSeed = mist.random(2)
+				cjtfRedTroopTypeSeed = math.random(2)
 				if cjtfRedTroopTypeSeed == 1 then
 					if squadTypeSeed < 3 then
 						initializeTransport(hostVehicle,insRifleSquadBTR_BMP2)
@@ -1336,7 +1335,7 @@ function determineRandomSquad(hostVehicle)
 				end
 			end
 		elseif vehichleType == 'ZBD04A'  or vehichleType == 'BMP-3' or vehichleType == 'BTR-82A' then
-			squadTypeSeed = mist.random(7)
+			squadTypeSeed = math.random(7)
 			if squadTypeSeed < 5 then
 				initializeTransport(hostVehicle,russianRifleSquadBTR_BMP2_BMP3)
 			elseif squadTypeSeed < 7 then
@@ -1346,14 +1345,14 @@ function determineRandomSquad(hostVehicle)
 			end
 		elseif vehichleType == 'GAZ-66' or vehichleType == 'KAMAZ Truck' then
 			--trucks may not get any dismounts, depending on randomizer
-			squadTypeSeed = mist.random(7)
+			squadTypeSeed = math.random(7)
 			if squadTypeSeed < 4 then
 				return 0
 			elseif squadTypeSeed < 7 then
 				if countryId == 17 then
 					initializeTransport(hostVehicle,insMortarTeam)
 				elseif countryId == 81 then
-					cjtfRedTroopTypeSeed = mist.random(2)
+					cjtfRedTroopTypeSeed = math.random(2)
 					if cjtfRedTroopTypeSeed == 1 then
 						initializeTransport(hostVehicle,insMortarTeam)
 					else
@@ -1366,7 +1365,7 @@ function determineRandomSquad(hostVehicle)
 				if countryId == 17 then
 					initializeTransport(hostVehicle,insRifleSquadMTLB)
 				elseif countryId == 81 then
-					cjtfRedTroopTypeSeed = mist.random(2)
+					cjtfRedTroopTypeSeed = math.random(2)
 					if cjtfRedTroopTypeSeed == 1 then
 						initializeTransport(hostVehicle,insRifleSquadMTLB)
 					else
@@ -1377,7 +1376,7 @@ function determineRandomSquad(hostVehicle)
 				end
 			end			
 		elseif vehichleType == 'BMP-1' then
-			squadTypeSeed = mist.random(7)
+			squadTypeSeed = math.random(7)
 			--trigger.action.outText('seed:' .. squadTypeSeed, 20)
 			if countryId == 17 then
 				if squadTypeSeed < 3 then
@@ -1392,7 +1391,7 @@ function determineRandomSquad(hostVehicle)
 					initializeTransport(hostVehicle,insSquadAntiAirBMP1)
 				end
 			elseif countryId == 81 then
-				cjtfRedTroopTypeSeed = mist.random(2)
+				cjtfRedTroopTypeSeed = math.random(2)
 				if cjtfRedTroopTypeSeed == 1 then
 					if squadTypeSeed < 3 then
 						initializeTransport(hostVehicle,insRifleSquadBMP1)
@@ -1427,7 +1426,7 @@ function determineRandomSquad(hostVehicle)
 			if countryId == 17 then
 				initializeTransport(hostVehicle,insSquadBMD1)
 			elseif countryId == 81 then
-				cjtfRedTroopTypeSeed = mist.random(2)
+				cjtfRedTroopTypeSeed = math.random(2)
 				if cjtfRedTroopTypeSeed == 1 then
 					initializeTransport(hostVehicle,insSquadBMD1)
 				else
@@ -1437,7 +1436,7 @@ function determineRandomSquad(hostVehicle)
 				initializeTransport(hostVehicle,russianVDVBMD1)
 			end			
 		elseif vehichleType == 'MTLB' then
-			squadTypeSeed = mist.random(9)
+			squadTypeSeed = math.random(9)
 			if countryId == 17 then
 				if squadTypeSeed < 3 then
 					initializeTransport(hostVehicle,insRifleSquadMTLB)
@@ -1453,7 +1452,7 @@ function determineRandomSquad(hostVehicle)
 					initializeTransport(hostVehicle,insSquadAntiAirMTLB)
 				end
 			elseif countryId == 81 then
-				cjtfRedTroopTypeSeed = mist.random(2)
+				cjtfRedTroopTypeSeed = math.random(2)
 				if cjtfRedTroopTypeSeed == 1 then
 					if squadTypeSeed < 3 then
 						initializeTransport(hostVehicle,insRifleSquadMTLB)
@@ -1500,7 +1499,7 @@ function determineRandomSquad(hostVehicle)
 	else --West
 		if vehichleType == 'M-2 Bradley' or vehichleType == 'Marder' or vehichleType == 'MCV-80' then
 			--randomize a number, and determine squad type corresponding to nation and number for this vehicle type, in this case, 7 men squads
-			squadTypeSeed = mist.random(7) --1 to 4 = rifle squad, 5 and 6 = rifle squad with 1 manpads, 7 = air defense squad with manpads cmd+2 manpads+4 riflemen			
+			squadTypeSeed = math.random(7) --1 to 4 = rifle squad, 5 and 6 = rifle squad with 1 manpads, 7 = air defense squad with manpads cmd+2 manpads+4 riflemen			
 			if squadTypeSeed < 5 then
 				initializeTransport(hostVehicle,usaSquadBradleyMarderWarrior)
 			elseif squadTypeSeed < 7 then
@@ -1510,7 +1509,7 @@ function determineRandomSquad(hostVehicle)
 			end
 		elseif vehichleType == 'M 818' then
 			--trucks may not get any dismounts, depending on randomizer
-			squadTypeSeed = mist.random(7)
+			squadTypeSeed = math.random(7)
 			if squadTypeSeed < 4 then
 				return 0
 			elseif squadTypeSeed < 7 then
@@ -1519,7 +1518,7 @@ function determineRandomSquad(hostVehicle)
 				initializeTransport(hostVehicle,usaSquadM113)
 			end
 		elseif vehichleType == 'LAV-25' then
-			squadTypeSeed = mist.random(7)			
+			squadTypeSeed = math.random(7)			
 			if squadTypeSeed < 4 then
 				initializeTransport(hostVehicle,usaSquadLAV25)
 			elseif squadTypeSeed < 6 then
@@ -1528,14 +1527,14 @@ function determineRandomSquad(hostVehicle)
 				initializeTransport(hostVehicle,westMortarTeam)
 			end
 		elseif vehichleType == 'M-113' then
-			squadTypeSeed = mist.random(5)
+			squadTypeSeed = math.random(5)
 			if squadTypeSeed < 4 then
 				initializeTransport(hostVehicle,usaSquadM113)
 			else
 				initializeTransport(hostVehicle,usaSquadManpadsM113)
 			end
 		elseif vehichleType == 'M1126 Stryker ICV' then
-			squadTypeSeed = mist.random(9)
+			squadTypeSeed = math.random(9)
 			if squadTypeSeed < 5 then
 				initializeTransport(hostVehicle,usaSquadStryker)
 			elseif squadTypeSeed < 8 then
@@ -1544,14 +1543,14 @@ function determineRandomSquad(hostVehicle)
 				initializeTransport(hostVehicle,usaFireteamStryker)
 			end
 		elseif vehichleType == 'AAV7' then
-			squadTypeSeed = mist.random(5)
+			squadTypeSeed = math.random(5)
 			if squadTypeSeed < 4 then
 				initializeTransport(hostVehicle,usaSquadAAV7USMC)				
 			else
 				initializeTransport(hostVehicle,usaSquadManpadsAAV7USMC)
 			end
 		elseif vehichleType == 'TPZ' then
-			squadTypeSeed = mist.random(5)
+			squadTypeSeed = math.random(5)
 			if squadTypeSeed < 4 then
 				initializeTransport(hostVehicle,gerSquadTPz)				
 			else
@@ -1574,25 +1573,25 @@ function determineRandomSquad(hostVehicle)
 
 	if dismountsOptions["FrenchPack"] == true then
 			if vehichleType == 'VBCI' then --VBCI 8 troops capacity
-				squadTypeSeed = mist.random(7)	
+				squadTypeSeed = math.random(7)	
 				local pseudoFrenchySquad = {}
 				if squadTypeSeed < 5 then
-					pseudoFrenchySquad = mist.utils.deepCopy(usaSquadBradleyMarderWarrior)
+					pseudoFrenchySquad = UTILS.DeepCopy(usaSquadBradleyMarderWarrior)
 					table.insert(pseudoFrenchySquad,'Soldier M4')
 				elseif squadTypeSeed < 8 then
-					pseudoFrenchySquad = mist.utils.deepCopy(usaSquadManpadsBradleyMarder)
+					pseudoFrenchySquad = UTILS.DeepCopy(usaSquadManpadsBradleyMarder)
 					table.insert(pseudoFrenchySquad,'Soldier M4')
 				end
 				initializeTransport(hostVehicle,pseudoFrenchySquad)
 			elseif vehichleType == 'VAB_50' or vehichleType == 'VIB_VBR' or vehichleType == 'VAB_RADIO' then --VAB 10 troops capacity
-				squadTypeSeed = mist.random(5)
+				squadTypeSeed = math.random(5)
 				if squadTypeSeed < 4 then
 					initializeTransport(hostVehicle,gerSquadTPz)				
 				else
 					initializeTransport(hostVehicle,gerSquadManpadsTPz)
 				end
 			elseif vehichleType == 'TRM2000' then
-				squadTypeSeed = mist.random(7)
+				squadTypeSeed = math.random(7)
 				if squadTypeSeed < 4 then
 					return 0
 				elseif squadTypeSeed < 7 then
@@ -1667,7 +1666,7 @@ function mechanizeAll(optionsList)
 		setOptions(optionsList)
 	end
 
-	local units = mist.makeUnitTable({'[all][vehicle]'})
+	local units = RetUtils.getUnitNames(nil, {Group.Category.GROUND})
 	local ignoreVehicleList = dismountsOptions['VehiclesToIgnore']
 
 	for i=1,#units do
@@ -1714,7 +1713,7 @@ function mechanizeAll(optionsList)
 end
 
 function addTransportType(transportType, troopCapacity)
-	local units = mist.makeUnitTable({'[all][vehicle]'})
+	local units = RetUtils.getUnitNames(nil, {Group.Category.GROUND})
 	local ignoreVehicleList = dismountsOptions['VehiclesToIgnore']
 
 	for i=1,#units do
@@ -1747,7 +1746,7 @@ function spawnWeaponSite(groupName)
 		return false
 	end
 
-	--trigger.action.outText(mist.utils.tableShow(groupDismounting),15)
+	--trigger.action.outText(UTILS.TableShow(groupDismounting),15)
 	
 	--find in weaponTransports
 	local transportData = {}
@@ -1789,7 +1788,7 @@ function spawnWeaponSite(groupName)
 		end
 	end
 
-	--trigger.action.outText(mist.utils.tableShow(transportData["groupCargo"]),15)
+	--trigger.action.outText(UTILS.TableShow(transportData["groupCargo"]),15)
 
 	--go through still alive units
 	for vhc=1,#transportData["groupCargo"] do
@@ -1824,7 +1823,7 @@ function spawnWeaponSite(groupName)
 	end
 	newGroup["units"] = unitsInNewGroup
 	--trigger.action.outText('CountryID = ' .. countryId,15)
-	--trigger.action.outText(mist.utils.tableShow(newGroup),15)
+	--trigger.action.outText(UTILS.TableShow(newGroup),15)
 	
 	
 	--spawn their cargo at the location of worker infantry, but only if worker infantry is still alive
@@ -1833,7 +1832,7 @@ function spawnWeaponSite(groupName)
 	table.insert(removeFromWeaponTransports,groupName)
 	--move the column forward a bit and away from deployed things
 	local transportingGroupHdg = getHeading(Group.getByName(groupName):getUnit(1):getPosition())
-	local transportingGroupPos = mist.utils.makeVec2(Group.getByName(groupName):getUnit(1):getPoint())
+	local transportingGroupPos = UTILS.Vec3toVec2(Group.getByName(groupName):getUnit(1):getPoint())
 	local trasportingGroupNewPos3Wpt = newCoordFromDistanceBearing(transportingGroupPos,transportingGroupHdg,100)
 	addWaypointToVehicles(groupName,trasportingGroupNewPos3Wpt)
 end
@@ -1854,7 +1853,7 @@ local function spawnSquad(hostVehicle,alternateCargo,initialWPVec2)
 			cargo = alternateCargo
 		}
 
-		--trigger.action.outText(mist.utils.tableShow(transportVehicle),15)
+		--trigger.action.outText(UTILS.TableShow(transportVehicle),15)
 	end
 
 	if transportVehicle ~= nil then
@@ -1881,7 +1880,7 @@ local function spawnSquad(hostVehicle,alternateCargo,initialWPVec2)
 		--	trigger.action.outText('So this is our vehicle with zone...',15)
 		--
 		--	if zoneDismountWP ~= nil then
-		--		trigger.action.outText(mist.utils.tableShow(zoneDismountWP),15)
+		--		trigger.action.outText(UTILS.TableShow(zoneDismountWP),15)
 		--	else
 		--		trigger.action.outText('AND YET ITS ZONE AINT FOUND... GGGRRRRRRRRRRRRRR',15)
 		--	end
@@ -1896,7 +1895,7 @@ local function spawnSquad(hostVehicle,alternateCargo,initialWPVec2)
 			
 			groupsWithRoutes[hostVehicle] = routeToSchedule
 		elseif zoneDismountWP ~= nil then
-			--trigger.action.outText(mist.utils.tableShow(zoneDismountWP),15)
+			--trigger.action.outText(UTILS.TableShow(zoneDismountWP),15)
 			--local dismountsWP2X = zoneDismountWP.point.x
 			--local dismountsWP2Y = zoneDismountWP.point.z
 
@@ -1904,7 +1903,7 @@ local function spawnSquad(hostVehicle,alternateCargo,initialWPVec2)
 
 			groupsWithRoutes[hostVehicle] = routeToSchedule
 
-			--trigger.action.outText(mist.utils.tableShow(groupsWithRoutes),15)
+			--trigger.action.outText(UTILS.TableShow(groupsWithRoutes),15)
 		end
 
 		local pointsForFirstWP = 
@@ -2038,7 +2037,7 @@ local function checkMovement()
 				unitId = Unit.getByName(unitName):getID()
 
 				local v = dismountingTransport:getVelocity()	--Velocity is a Vec3
-				local spd = mist.vec.mag(v)
+				local spd = UTILS.VecNorm(v)
 
 				if spd < 1 and dismountingTransport:isActive()==true then	--Check if speed is zero
 					if transportData.cargo_status == "mounted" then
@@ -2084,7 +2083,7 @@ local function checkMovement()
 			--trigger.action.outText('so this should really work.. '..key,35)
 			local newPath = {}
 			newPath[1] = value
-			--trigger.action.outText('WPT is: '..mist.utils.tableShow(newPath),35)
+			--trigger.action.outText('WPT is: '..UTILS.TableShow(newPath),35)
 			addWaypointToGroup(key,newPath)
 			if groupsWithRoutesUpdated[key] ~= nil then
 				groupsWithRoutesUpdated[key] = groupsWithRoutesUpdated[key] + 1
@@ -2119,14 +2118,14 @@ local function checkMovement()
 				local groupTransportingWeaponSite = weaponTransports[i]["groupName"]
 				local leaderVhc = Group.getByName(groupTransportingWeaponSite):getUnit(1)
 				local vel = leaderVhc:getVelocity()
-				local speed = mist.vec.mag(vel)
+				local speed = UTILS.VecNorm(vel)
 				local leaderPos = leaderVhc:getPoint()				
 			
 				if speed < 1 then --Check if lead vehicle from our weapon site tranport column is stopped
 					--if so, let's see if it is near the group's final waypoint
-					local groupPath = mist.getGroupPoints(groupTransportingWeaponSite)					
+					local groupPath = GROUP:FindByName(groupTransportingWeaponSite):GetTemplateRoutePoints()					
 
-					local distanceToFinalWP = mist.utils.get2DDist(mist.utils.makeVec2(leaderPos),groupPath[#groupPath])
+					local distanceToFinalWP = RetUtils.get2DDist(leaderPos,groupPath[#groupPath])
 					if distanceToFinalWP < 101 then
 						--spawn the "worker" infantry first TODO
 						spawnTransportWorkers(groupTransportingWeaponSite)
@@ -2213,7 +2212,7 @@ local function sanitizeMarkers(markerText, markerId)
 		--Check if the marker is created by a player from same side as the unit
 		local unitCoalition = Unit.getByName(unitName):getCoalition()
 		if currentMarker.coalition ~= unitCoalition then
-			mist.marker.remove(markerId)
+			UTILS.RemoveMark(markerId)
 			return 0
 		end
 
@@ -2221,7 +2220,7 @@ local function sanitizeMarkers(markerText, markerId)
 		if #markers > 1 then
 			for i=1,#markers do
 				if markers[i].idx ~= markerId then
-					mist.marker.remove(markers[i].idx)				
+					UTILS.RemoveMark(markers[i].idx)				
 				else
 					table.insert(markerIdForWP, markers[i])
 				end

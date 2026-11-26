@@ -7,15 +7,16 @@
 -- tasks, skill and -- critically -- its group and unit names, so DCS
 -- Retribution's kill/loss tracking and state.json parsing stay correct.
 --
--- Part of the mandatory "base" plugin. Requires mist, which the plugin loads
--- first (this script is registered after moose.lua in plugin.json).
+-- Part of the mandatory "base" plugin. Requires MOOSE and retribution_utils.lua,
+-- which the plugin loads first (see plugin.json).
 --
--- Mechanism: a live unit cannot be cheaply teleported, so we read the original
--- group definition with mist.getGroupData(), edit the x/y of beached units (and
+-- Mechanism: a live unit cannot be cheaply teleported, so we read the group's
+-- mission template with GROUP:GetTemplate(), edit the x/y of beached units (and
 -- the spawn waypoint if it is dry), and re-add the group under the same name
--- with mist.dynAdd(). coalition.addGroup with an existing name silently swaps
--- the units (fires S_EVENT_BIRTH only), so none of the four loss/kill events
--- Retribution tracks are emitted.
+-- with RetUtils.respawnFromTemplate(). coalition.addGroup with an existing name
+-- silently swaps the units (fires S_EVENT_BIRTH only), so none of the four
+-- loss/kill events Retribution tracks are emitted. Because the full template is
+-- re-used, the route, waypoint tasks and late-activation state are kept as-is.
 --
 -- Destination is deep WATER only (not SHALLOW_WATER): the nearest wet point to a
 -- beached ship is the waterline, which is often too shallow to float a hull, so
@@ -39,7 +40,7 @@
 -- Tunable constants -----------------------------------------------------------
 local NM = 1852  -- metres per nautical mile
 
-local RELOCATE_DELAY  = 1        -- seconds after start, so mist's group DB is ready
+local RELOCATE_DELAY  = 1        -- seconds after start, once every group has spawned
 local SEARCH_STEP     = 60       -- metres between expanding search rings
 local SEARCH_MAX      = 7 * NM   -- give up beyond ~7 nm. A carrier's outer escort
                                  -- ring sits up to ~5.8 nm out (Carrier_Strike_
@@ -214,7 +215,8 @@ local function run()
     for _, side in ipairs({ coalition.side.RED, coalition.side.BLUE }) do
         for _, group in ipairs(coalition.getGroups(side, Group.Category.SHIP)) do
             local name = group:getName()
-            local data = mist.getGroupData(name)
+            local moose_group = GROUP:FindByName(name)
+            local data = moose_group and moose_group:GetTemplate()
             if data and data.units and #data.units > 0 then
                 ships[#ships + 1] = { name = name, data = data }
                 for _, unit in ipairs(data.units) do
@@ -280,7 +282,7 @@ local function run()
 
         if changed then
             env.info("land_relocate: relocating " .. name)
-            mist.dynAdd(data)
+            RetUtils.respawnFromTemplate(data)
         end
     end
 end

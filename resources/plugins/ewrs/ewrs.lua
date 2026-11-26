@@ -15,7 +15,7 @@
 
 	Built and Tested in DCS 1.5 - See https://github.com/Bob7heBuilder/EWRS for the latest version
 
-	This script uses MIST 4.0.57 or later - https://github.com/mrSkortch/MissionScriptingTools
+	This script uses MOOSE and DCS Retribution's retribution_utils.lua (both loaded by the base plugin)
 
 	At the moment, because of limitations within DCS to not show messages to individual units, the reference, measurements, and messages
 	are done per group. So a group of 4 fighters will each receive 4 BRA messages. Each message however, will have the player's name
@@ -229,12 +229,12 @@ function ewrs.buildThreatTable(activePlayer, bogeyDope)
 
 		if ewrs.groupSettings[tostring(activePlayer.groupID)].measurements == "metric" then
 			range = range / 1000 --change to KM
-			speed = mist.utils.mpsToKmph(speed)
+			speed = UTILS.MpsToKmph(speed)
 			--altitude already in meters
 		else
-			range = mist.utils.metersToNM(range)
-			speed = mist.utils.mpsToKnots(speed)
-			altitude = mist.utils.metersToFeet(altitude)
+			range = UTILS.MetersToNM(range)
+			speed = UTILS.MpsToKnots(speed)
+			altitude = UTILS.MetersToFeet(altitude)
 		end
 
 		if ewrs.useImprovedDetectionLogic then
@@ -412,12 +412,12 @@ function ewrs.buildFriendlyTable(friendlyNames,activePlayer)
 
 			if ewrs.groupSettings[tostring(activePlayer.groupID)].measurements == "metric" then
 				range = range / 1000 --change to KM
-				speed = mist.utils.mpsToKmph(speed)
+				speed = UTILS.MpsToKmph(speed)
 				--altitude already in meters
 			else
-				range = mist.utils.metersToNM(range)
-				speed = mist.utils.mpsToKnots(speed)
-				altitude = mist.utils.metersToFeet(altitude)
+				range = UTILS.MetersToNM(range)
+				speed = UTILS.MpsToKnots(speed)
+				altitude = UTILS.MetersToFeet(altitude)
 			end
 
 			local j = #friendlyTable + 1
@@ -442,14 +442,11 @@ function ewrs.friendlyPicture(args)
 	local status, result = pcall(function()
 		for i = 1, #ewrs.activePlayers do
 			if ewrs.activePlayers[i].groupID == args[1] then
-				local sideString = nil
+				local side = coalition.side.BLUE
 				if  ewrs.activePlayers[i].side == 1 then
-					sideString = "[red]"
-				else
-					sideString = "[blue]"
+					side = coalition.side.RED
 				end
-				local filter = {sideString.."[helicopter]", sideString.."[plane]"}
-				local friendlies = mist.makeUnitTable(filter) --find a way to do this only once if there is more then 1 person in a group
+				local friendlies = RetUtils.getUnitNames({side}, {Group.Category.HELICOPTER, Group.Category.AIRPLANE}) --find a way to do this only once if there is more then 1 person in a group
 				local friendlyTable = ewrs.buildFriendlyTable(friendlies,ewrs.activePlayers[i])
 				local greeting = "EWRS Friendly Picture for: " .. ewrs.activePlayers[i].player
 				ewrs.outText(ewrs.activePlayers[i],friendlyTable,false,greeting)
@@ -463,8 +460,7 @@ end
 
 function ewrs.buildActivePlayers()
 	local status, result = pcall(function()
-		local filter = { "[all][plane]","[all][helicopter]"}
-		local all_vecs = mist.makeUnitTable(filter)
+		local all_vecs = RetUtils.getUnitNames(nil, {Group.Category.AIRPLANE, Group.Category.HELICOPTER})
 		ewrs.activePlayers = {}
 		for i = 1, #all_vecs do
 			local vec = Unit.getByName(all_vecs[i])
@@ -497,21 +493,18 @@ end
 --And Stonehouse for pointing me there
 function ewrs.getGroupId(_unit) --Temp fix for client groups not being accessable
 
-    local _unitDB =  mist.DBs.unitsById[tonumber(_unit:getID())]
-    if _unitDB ~= nil and _unitDB.groupId then
-        return _unitDB.groupId
-    end
-
-    return nil
+    return RetUtils.getGroupId(_unit)
 end
 
 function ewrs.getGroupCategory(unit)
-	local unitDB = mist.DBs.unitsById[tonumber(unit:getID())]
-	 if unitDB ~= nil and unitDB.category then
-        return unitDB.category
-    end
+	local category = unit:getDesc().category
+	if category == Unit.Category.AIRPLANE then
+		return "plane"
+	elseif category == Unit.Category.HELICOPTER then
+		return "helicopter"
+	end
 
-    return nil
+	return nil
 end
 
 function ewrs.addPlayer(playerName, groupID, unit )
@@ -602,15 +595,14 @@ function ewrs.findDetectedTargets(side)
 end
 
 function ewrs.findRadarUnits()
-	local filter = {}
-	if ewrs.enableBlueTeam and ewrs.enableRedTeam then
-		filter = { "[all][plane]", "[all][vehicle]", "[all][ship]"}
-	elseif ewrs.enableBlueTeam then
-		filter = { "[blue][plane]", "[blue][vehicle]", "[blue][ship]"}
-	elseif ewrs.enableRedTeam then
-		filter = { "[red][plane]", "[red][vehicle]", "[red][ship]"}
+	local sides = {}
+	if ewrs.enableBlueTeam then
+		sides[#sides + 1] = coalition.side.BLUE
 	end
-	local all_vecs = mist.makeUnitTable(filter)
+	if ewrs.enableRedTeam then
+		sides[#sides + 1] = coalition.side.RED
+	end
+	local all_vecs = RetUtils.getUnitNames(sides, {Group.Category.AIRPLANE, Group.Category.GROUND, Group.Category.SHIP})
 	local redUnits = {}
 	local blueUnits = {}
 
