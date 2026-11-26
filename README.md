@@ -89,9 +89,8 @@ Tutorials, contributors and developer's guides are available in the project's
 First, a big thanks to shdwp, for starting the original DCS Liberation project. 
 
 Then, DCS Liberation/Retribution uses [pydcs](https://github.com/pydcs/dcs) for mission generation, and nothing would be possible without this.
-It also uses the popular [Mist](https://github.com/mrSkortch/MissionScriptingTools) lua framework for mission scripting. Support for the 
-impressive [Moose](https://github.com/FlightControl-Master/MOOSE) framework was also introduced,
-allowing for even more customization.
+It also uses the impressive [Moose](https://github.com/FlightControl-Master/MOOSE) lua framework for mission scripting,
+allowing for even more customization. Earlier versions used the popular [Mist](https://github.com/mrSkortch/MissionScriptingTools) framework.
 
 Excellent lua scripts DCS Liberation/Retribution uses as plugins:
 

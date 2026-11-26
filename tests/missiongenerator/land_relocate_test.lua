@@ -1,7 +1,7 @@
 -- land_relocate_test.lua
 --
 -- Standalone unit test for resources/plugins/base/land_relocate.lua under a
--- mocked DCS/mist environment. Not run by CI (CI has no Lua); run locally with:
+-- mocked DCS/MOOSE environment. Not run by CI (CI has no Lua); run locally with:
 --
 --   lua    tests/missiongenerator/land_relocate_test.lua
 --   luajit tests/missiongenerator/land_relocate_test.lua
@@ -20,11 +20,11 @@ local SURF = { LAND = 1, ROAD = 2, RUNWAY = 3, WATER = 4, SHALLOW_WATER = 5 }
 -- Test state, reset by each scenario via setup().
 local surface_fn   -- function(x, y) -> SURF.*
 local groups       -- list of ship groups for coalition.side.BLUE
-local dynadd_calls -- list of data tables passed to mist.dynAdd
+local dynadd_calls -- list of templates passed to RetUtils.respawnFromTemplate
 local warnings     -- list of env.warning strings
 local scheduled    -- the function handed to timer.scheduleFunction
 
--- Install the mocked DCS/mist globals the script closes over.
+-- Install the mocked DCS/MOOSE globals the script closes over.
 local function setup()
     surface_fn = function()
         return SURF.LAND
@@ -53,16 +53,25 @@ local function setup()
 
     Group = { Category = { SHIP = "ship" } }
 
-    mist = {
-        getGroupData = function(name)
+    -- MOOSE GROUP wrapper: FindByName returns an object whose GetTemplate()
+    -- hands back the group's mission template.
+    GROUP = {
+        FindByName = function(_, name)
             for _, g in ipairs(groups) do
                 if g.name == name then
-                    return g.data
+                    return {
+                        GetTemplate = function()
+                            return g.data
+                        end,
+                    }
                 end
             end
             return nil
         end,
-        dynAdd = function(data)
+    }
+
+    RetUtils = {
+        respawnFromTemplate = function(data)
             dynadd_calls[#dynadd_calls + 1] = data
         end,
     }
@@ -85,7 +94,7 @@ local function setup()
 end
 
 -- Register a ship group. The entry doubles as the DCS group object (getName)
--- and the carrier of its mist group data.
+-- and the carrier of its group template.
 local function add_group(name, data)
     groups[#groups + 1] = {
         name = name,
@@ -100,7 +109,7 @@ end
 local function add_ship(name, x, y)
     add_group(name, {
         name = name,
-        units = { { unitName = name .. "-1", x = x, y = y } },
+        units = { { name = name .. "-1", x = x, y = y } },
     })
 end
 
@@ -214,7 +223,7 @@ local function test_spawn_waypoint_relocated()
     add_group("escort", {
         name = "escort",
         -- Unit already afloat, but the spawn waypoint is on land.
-        units = { { unitName = "escort-1", x = 1000, y = 0 } },
+        units = { { name = "escort-1", x = 1000, y = 0 } },
         route = { points = { { x = 0, y = 0 } } },
     })
 

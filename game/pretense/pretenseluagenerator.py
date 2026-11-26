@@ -1527,7 +1527,11 @@ class PretenseLuaGenerator(LuaGenerator):
         return lua_string_connman
 
     def generate_pretense_plugin_data(self) -> None:
-        self.inject_plugin_script("base", "mist_4_5_126.lua", "mist_4_5_126")
+        # The Pretense scripts run on MOOSE and Retribution's helper library, so
+        # both must be loaded before pretense_compiled.lua. The mnemonics match the
+        # base plugin's work orders, which are then skipped as already loaded.
+        self.inject_plugin_script("base", "Moose.lua", "moose")
+        self.inject_plugin_script("base", "retribution_utils.lua", "retribution_utils")
 
         lua_string_config = "Config = Config or {}\n"
 
@@ -1801,13 +1805,6 @@ class PretenseLuaGenerator(LuaGenerator):
     def inject_plugin_script(
         self, plugin_mnemonic: str, script: str, script_mnemonic: str
     ) -> None:
-        # Hard block MOOSE injection for Pretense missions
-        if script_mnemonic.lower() == "moose" or "moose" in script.lower():
-            logging.info(
-                "PretenseLuaGenerator: Skipping hard-blocked Moose.lua injection"
-            )
-            return
-
         if script_mnemonic in self.plugin_scripts:
             logging.debug(f"Skipping already loaded {script} for {plugin_mnemonic}")
             return

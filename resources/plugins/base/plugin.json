@@ -5,8 +5,12 @@
     "specificOptions": [],
     "scriptsWorkOrders": [
         {
-            "file": "mist_4_5_126.lua",
-            "mnemonic": "mist"
+            "file": "Moose.lua",
+            "mnemonic": "moose"
+        },
+        {
+            "file": "retribution_utils.lua",
+            "mnemonic": "retribution_utils"
         },
         {
             "file": "json.lua",
@@ -15,10 +19,6 @@
         {
             "file": "dcs_retribution.lua",
             "mnemonic": "retribution"
-        },
-        {
-            "file": "moose.lua",
-            "mnemonic": "moose"
         },
         {
             "file": "water_relocate.lua",
