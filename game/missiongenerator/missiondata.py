@@ -97,12 +97,33 @@ class LogisticsInfo:
     transport: AircraftType
     blue: Player
 
+    group_name: str = field(default_factory=str)
+
     logistic_unit: str = field(default_factory=str)
     pickup_zone: str = field(default_factory=str)
     drop_off_zone: str = field(default_factory=str)
     target_zone: str = field(default_factory=str)
     cargo: list[CargoInfo] = field(default_factory=list)
     preload: bool = field(default=False)
+
+
+@dataclass
+class CtldTroopTemplate:
+    """A late-activated troop group the CTLD plugin offers as troop cargo."""
+
+    side: int
+    name: str
+    group_name: str
+    troops: int
+
+
+@dataclass
+class CtldCrateTemplate:
+    """A late-activated vehicle group the CTLD plugin builds from a crate."""
+
+    side: int
+    unit_type: str
+    group_name: str
 
 
 @dataclass
@@ -121,6 +142,8 @@ class MissionData:
     tankers: list[TankerInfo] = field(default_factory=list)
     jtacs: list[JtacInfo] = field(default_factory=list)
     logistics: list[LogisticsInfo] = field(default_factory=list)
+    ctld_troop_templates: list[CtldTroopTemplate] = field(default_factory=list)
+    ctld_crate_templates: list[CtldCrateTemplate] = field(default_factory=list)
     escorts: list[EscortInfo] = field(default_factory=list)
     cp_stack: dict[UUID, Distance] = field(default_factory=dict)
     player_frontline_groups: list[FrontlineUnitGroupsInfo] = field(default_factory=list)

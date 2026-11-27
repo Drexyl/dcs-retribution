@@ -112,7 +112,8 @@ def test_pretense_does_not_overwrite_moose_classes() -> None:
 
 
 @pytest.mark.parametrize(
-    "lua_test", ["land_relocate_test.lua", "retribution_utils_test.lua"]
+    "lua_test",
+    ["land_relocate_test.lua", "retribution_utils_test.lua", "ctld_config_test.lua"],
 )
 def test_lua_unit_tests_pass(lua_test: str, monkeypatch: pytest.MonkeyPatch) -> None:
     # The Lua tests load the scripts under test relative to the repository root.

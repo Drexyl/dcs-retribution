@@ -38,6 +38,7 @@ from .flotgenerator import FlotGenerator
 from .forcedoptionsgenerator import ForcedOptionsGenerator
 from .frontlineconflictdescription import FrontLineConflictDescription
 from .kneeboard import KneeboardGenerator
+from .ctldtemplategenerator import CtldTemplateGenerator
 from .luagenerator import LuaGenerator
 from .missiondata import MissionData
 from .rebelliongenerator import RebellionGenerator
@@ -122,6 +123,8 @@ class MissionGenerator:
         # rather than the first player flight with a TGP.
         self.generate_ground_conflicts()
         self.generate_air_units(tgo_generator)
+        if self.game.settings.plugin_option("ctld"):
+            CtldTemplateGenerator(self.mission, self.game, self.mission_data).generate()
 
         RebellionGenerator(self.mission, self.game).generate()
         TriggerGenerator(self.mission, self.game).generate()
