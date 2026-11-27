@@ -26,6 +26,30 @@ local dcs_groups   -- group name -> mocked DCS group (JTACs)
 local smokes       -- zone names smoked
 local autolases
 local errors
+local spawns       -- groups spawned through SPAWN
+
+-- Ground height under every mocked unit.
+local GROUND = 100
+
+local function mock_coordinate(x, y, z)
+    local coordinate = { x = x, y = y, z = z }
+    function coordinate:GetLandHeight() return GROUND end
+    function coordinate:GetVec2() return { x = self.x, y = self.z } end
+    function coordinate:Translate(distance, angle)
+        local a = math.rad(angle)
+        return mock_coordinate(self.x + distance * math.cos(a), self.y, self.z + distance * math.sin(a))
+    end
+    return coordinate
+end
+
+local function mock_cargo(cargo_type, templates)
+    local cargo = { cargo_type = cargo_type, templates = templates, dropped = false }
+    function cargo:GetType() return self.cargo_type end
+    function cargo:GetTemplates() return self.templates end
+    function cargo:WasDropped() return self.dropped end
+    function cargo:SetWasDropped(dropped) self.dropped = dropped end
+    return cargo
+end
 
 local function mock_unit(name, type_name, options)
     options = options or {}
@@ -37,6 +61,9 @@ local function mock_unit(name, type_name, options)
         in_air = options.in_air or false,
         agl = options.agl or 0,
         zones = options.zones or {},
+        -- Trigger zones the unit is in, by name.
+        in_zones = options.in_zones or {},
+        heading = options.heading or 0,
     }
     function unit:GetName() return self.name end
     function unit:GetTypeName() return self.type_name end
@@ -44,6 +71,9 @@ local function mock_unit(name, type_name, options)
     function unit:IsPlayer() return self.player end
     function unit:InAir() return self.in_air end
     function unit:GetGroup() return { unit_name = self.name } end
+    function unit:GetHeading() return self.heading end
+    function unit:GetCoordinate() return mock_coordinate(1000, GROUND + self.agl, 2000) end
+    function unit:IsInZone(zone) return self.in_zones[zone.name] == true end
     units[name] = unit
     return unit
 end
@@ -63,7 +93,12 @@ local function new_ctld(side)
         unloads = {},
         preloads = {},
         injected = {},
+        mass_updates = {},
+        deployed = {},
         CargoCounter = 0,
+        TroopCounter = 0,
+        DroppedTroops = {},
+        coalition = side == "blue" and 2 or 1,
         basetype = "container_cargo",
         started = false,
     }
@@ -120,6 +155,10 @@ local function new_ctld(side)
         table.insert(self.unloads, unit:GetName())
         self.Loaded_Cargo[unit:GetName()] = { Troopsloaded = 0 }
     end
+    function ctld:_UpdateUnitCargoMass(unit) table.insert(self.mass_updates, unit:GetName()) return self end
+    function ctld:__TroopsDeployed(delay, group, unit, troops, cargo_type)
+        table.insert(self.deployed, { group = group, unit = unit, troops = troops, cargo_type = cargo_type })
+    end
     function ctld:InjectStatics(zone, cargo, random)
         table.insert(self.injected, { zone = zone.name, cargo = cargo })
     end
@@ -128,7 +167,7 @@ end
 
 local function setup(options, data)
     ctlds, timers, event_handlers, units, dcs_units, dcs_groups = {}, {}, {}, {}, {}, {}
-    smokes, autolases, errors = {}, {}, {}
+    smokes, autolases, errors, spawns = {}, {}, {}, {}
     RetributionCTLD = nil
 
     env = {
@@ -182,6 +221,30 @@ local function setup(options, data)
         return timer_object
     end
     UNIT = { FindByName = function(_, name) return units[name] end }
+    -- Troop templates hold as many soldiers as their name says, e.g. "CTLD Blue Troops (24)".
+    _DATABASE = {
+        GetGroupTemplate = function(_, name)
+            local count = tonumber(name:match("%((%d+)%)"))
+            if not count then return nil end
+            local template_units = {}
+            for i = 1, count do template_units[i] = { name = name .. " #" .. i } end
+            return { units = template_units }
+        end,
+    }
+    SPAWN = {}
+    function SPAWN:NewWithAlias(template, alias)
+        local spawn = { template = template, alias = alias }
+        function spawn:InitDelayOff() return self end
+        function spawn:InitCoalition(coalition) self.coalition = coalition return self end
+        function spawn:InitSetUnitAbsolutePositions(positions) self.positions = positions return self end
+        function spawn:InitValidateAndRepositionGroundUnits() return self end
+        function spawn:SpawnFromVec2(vec2)
+            self.vec2 = vec2
+            table.insert(spawns, self)
+            return { spawn = self }
+        end
+        return spawn
+    end
     ZONE = {
         FindByName = function(_, name)
             return {
@@ -231,6 +294,10 @@ local function setup(options, data)
                     target_zone = "Herc target", side = "2", aircraft_type = "Hercules", preload = "true",
                 },
                 {
+                    pilot_names = { "C-130J 1" }, group_name = "C-130J group",
+                    target_zone = "C-130J target", side = "2", aircraft_type = "C-130J-30", preload = "true",
+                },
+                {
                     pilot_names = { "Hip 1" }, group_name = "Hip group",
                     pickup_zone = "Hip pickup", drop_off_zone = "Hip dropoff",
                     side = "1", aircraft_type = "Mi-8MT", preload = "false",
@@ -239,6 +306,7 @@ local function setup(options, data)
             transports = {
                 { aircraft_type = "UH-1H", cabin_size = "8", troops = "true", crates = "true", helicopter = "true" },
                 { aircraft_type = "Hercules", cabin_size = "24", troops = "true", crates = "true", helicopter = "false" },
+                { aircraft_type = "C-130J-30", cabin_size = "24", troops = "true", crates = "true", helicopter = "false" },
                 { aircraft_type = "Mi-8MT", cabin_size = "12", troops = "true", crates = "false", helicopter = "true" },
             },
             troop_templates = {
@@ -378,6 +446,72 @@ local function test_players_and_dead_units_ignored()
     check(#ctlds.blue.loads == 0, "players and dead units are not serviced")
 end
 
+local function loaded_troops(unit_name, ctld)
+    local troops = mock_cargo("Troops", { "CTLD Blue Troops (24)" })
+    local crate = mock_cargo("Vehicle", { "CTLD Blue M-113" })
+    ctld.Loaded_Cargo[unit_name] = { Troopsloaded = 24, Cratesloaded = 1, Cargo = { troops, crate } }
+    return troops, crate
+end
+
+local function test_fixed_wing_paradrop()
+    setup()
+    local ctld = ctlds.blue
+    local c130 = mock_unit("C-130J 1", "C-130J-30", { in_air = true, agl = 300, heading = 90 })
+    local troops, crate = loaded_troops("C-130J 1", ctld)
+
+    run_ai_check()
+    check(troops.dropped == false and #timers_with(60, nil) == 0, "no drop before the target zone")
+
+    c130.in_zones = { ["C-130J target"] = true }
+    run_ai_check()
+    check(troops.dropped == true, "troops jump over the target zone")
+    check(#ctld.unloads == 0, "MOOSE's own unload is not used")
+    local loaded = ctld.Loaded_Cargo["C-130J 1"]
+    check(loaded.Troopsloaded == 0 and loaded.Cratesloaded == 1 and loaded.Cargo[1] == crate, "crates stay on board")
+    check(ctld.mass_updates[1] == "C-130J 1", "cargo mass updated")
+    local landing = timers_with(60, nil)
+    check(#landing == 1, "troops land after descending 300 m at 5 m/s")
+    check(#spawns == 0, "nobody on the ground while under canopy")
+
+    run_ai_check()
+    check(#timers_with(60, nil) == 1, "no second drop")
+
+    landing[1].fn()
+    check(#spawns == 1, "the troop group spawns on landing")
+    local spawn = spawns[1]
+    check(spawn.template == "CTLD Blue Troops (24)" and spawn.coalition == 2, "spawned from the template")
+    check(#spawn.positions == 24, "every paratrooper placed")
+    local first, last = spawn.positions[1], spawn.positions[24]
+    check(math.abs(last.y - first.y - 23 * 15) < 0.01 and math.abs(first.x - last.x) < 0.01, "strung out along the track")
+    check(math.abs((first.y + last.y) / 2 - 2000) < 0.01, "centred on the drop point")
+    check(first.heading == 90, "facing the aircraft's heading")
+    check(ctld.TroopCounter == 1 and ctld.DroppedTroops[1] ~= nil, "CTLD tracks the dropped troops")
+    check(#ctld.deployed == 1 and ctld.deployed[1].cargo_type == "Troops", "CTLD moves them into the target zone")
+end
+
+local function test_paradrop_exclusions()
+    setup()
+    local ctld = ctlds.blue
+    -- The Anubis Hercules drops paratroopers from its loadout.
+    mock_unit("Herc 1", "Hercules", { in_air = true, agl = 300, in_zones = { ["Herc target"] = true } })
+    local herc_troops = loaded_troops("Herc 1", ctld)
+    -- A landed C-130J does not parachute anyone.
+    mock_unit("C-130J 1", "C-130J-30", { in_zones = { ["C-130J target"] = true } })
+    local c130_troops = loaded_troops("C-130J 1", ctld)
+    -- Helicopters land to unload.
+    mock_unit("Huey 1", "UH-1H", { in_air = true, agl = 300, in_zones = { ["Huey target"] = true } })
+    local huey_troops = loaded_troops("Huey 1", ctld)
+    run_ai_check()
+    check(not herc_troops.dropped and not c130_troops.dropped and not huey_troops.dropped, "nobody jumps")
+    check(#ctld.unloads == 0, "nobody unloads")
+
+    setup()
+    mock_unit("C-130J 1", "C-130J-30", { in_air = true, agl = 300, in_zones = { ["C-130J target"] = true }, player = true })
+    local player_troops = loaded_troops("C-130J 1", ctlds.blue)
+    run_ai_check()
+    check(not player_troops.dropped, "players drop their own troops")
+end
+
 local function test_preload()
     setup()
     local preload_timers = timers_with(5, nil)
@@ -463,6 +597,8 @@ local tests = {
     test_ai_loads_in_pickup_zone_and_unloads_in_dropoff,
     test_ai_on_carrier_and_inair_bug,
     test_players_and_dead_units_ignored,
+    test_fixed_wing_paradrop,
+    test_paradrop_exclusions,
     test_preload,
     test_airlift_crates,
     test_options_off,
