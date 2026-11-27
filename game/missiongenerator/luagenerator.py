@@ -114,20 +114,18 @@ class LuaGenerator:
         logistics_object = lua_data.add_item("Logistics")
         logistics_flights = logistics_object.add_item("flights")
         crates_object = logistics_object.add_item("crates")
-        spawnable_crates: dict[str, str] = {}
         transports: list[AircraftType] = []
         for logistic_info in self.mission_data.logistics:
             if logistic_info.transport not in transports:
                 transports.append(logistic_info.transport)
-            coalition_color = "blue" if logistic_info.blue.is_blue else "red"
+            side = str(2 if logistic_info.blue.is_blue else 1)
             logistics_item = logistics_flights.add_item()
             logistics_item.add_data_array("pilot_names", logistic_info.pilot_names)
+            logistics_item.add_key_value("group_name", logistic_info.group_name)
             logistics_item.add_key_value("pickup_zone", logistic_info.pickup_zone)
             logistics_item.add_key_value("drop_off_zone", logistic_info.drop_off_zone)
             logistics_item.add_key_value("target_zone", logistic_info.target_zone)
-            logistics_item.add_key_value(
-                "side", str(2 if logistic_info.blue.is_blue else 1)
-            )
+            logistics_item.add_key_value("side", side)
             logistics_item.add_key_value("logistic_unit", logistic_info.logistic_unit)
             logistics_item.add_key_value(
                 "aircraft_type", logistic_info.transport.dcs_id
@@ -136,13 +134,10 @@ class LuaGenerator:
                 "preload", "true" if logistic_info.preload else "false"
             )
             for cargo in logistic_info.cargo:
-                if cargo.unit_type not in spawnable_crates:
-                    spawnable_crates[cargo.unit_type] = str(200 + len(spawnable_crates))
-                crate_weight = spawnable_crates[cargo.unit_type]
-                for i in range(cargo.amount):
+                for _ in range(cargo.amount):
                     cargo_item = crates_object.add_item()
-                    cargo_item.add_key_value("weight", crate_weight)
-                    cargo_item.add_key_value("coalition", coalition_color)
+                    cargo_item.add_key_value("unit", cargo.unit_type)
+                    cargo_item.add_key_value("side", side)
                     cargo_item.add_key_value("zone", cargo.spawn_zone)
         transport_object = logistics_object.add_item("transports")
         for transport in transports:
@@ -155,23 +150,22 @@ class LuaGenerator:
             transport_item.add_key_value(
                 "crates", "true" if transport.can_carry_crates else "false"
             )
-            # A fixed-wing troop transport cannot land at the assault zone, so
-            # the CTLD runtime delivers its troops by paradrop instead (player:
-            # airborne unload jumps the stick; AI: auto-drop over the target
-            # zone). Helos keep the stock land/fast-rope behavior.
             transport_item.add_key_value(
-                "paradrop",
-                (
-                    "true"
-                    if transport.cabin_size > 0 and not transport.helicopter
-                    else "false"
-                ),
+                "helicopter", "true" if transport.helicopter else "false"
             )
-        spawnable_crates_object = logistics_object.add_item("spawnable_crates")
-        for unit, weight in spawnable_crates.items():
-            crate_item = spawnable_crates_object.add_item()
-            crate_item.add_key_value("unit", unit)
-            crate_item.add_key_value("weight", weight)
+        troop_templates_object = logistics_object.add_item("troop_templates")
+        for troop_template in self.mission_data.ctld_troop_templates:
+            troop_item = troop_templates_object.add_item()
+            troop_item.add_key_value("side", str(troop_template.side))
+            troop_item.add_key_value("name", troop_template.name)
+            troop_item.add_key_value("template", troop_template.group_name)
+            troop_item.add_key_value("troops", str(troop_template.troops))
+        crate_templates_object = logistics_object.add_item("crate_templates")
+        for crate_template in self.mission_data.ctld_crate_templates:
+            crate_item = crate_templates_object.add_item()
+            crate_item.add_key_value("side", str(crate_template.side))
+            crate_item.add_key_value("unit", crate_template.unit_type)
+            crate_item.add_key_value("template", crate_template.group_name)
 
         target_points = lua_data.add_item("TargetPoints")
         for flight in self.mission_data.flights:

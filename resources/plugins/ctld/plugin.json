@@ -1,20 +1,15 @@
 {
     "nameInUI": "CTLD",
-    "descriptionInUI": "Helicopter and transport logistics: sling-loading crates, deploying troops and vehicles, and JTAC autolasing for laser-guided strikes.",
+    "descriptionInUI": "Helicopter and transport logistics on MOOSE CTLD: crates, troop transport and drops (AI transports included), plus JTAC autolasing for laser-guided strikes.",
     "defaultValue": true,
     "specificOptions": [
         {
-            "nameInUI": "Tailor CTLD for the Retribution specific missions",
-            "mnemonic": "tailorctld",
-            "defaultValue": true
-        },
-        {
-            "nameInUI": "Create logistic unit in each pickup zone",
+            "nameInUI": "Place an ammo dump in each pickup zone",
             "mnemonic": "logisticunit",
             "defaultValue": true
         },
         {
-            "nameInUI": "CTLD Use smoke in zones",
+            "nameInUI": "CTLD Smoke pickup and drop-off zones",
             "mnemonic": "smoke",
             "defaultValue": true
         },
@@ -49,12 +44,7 @@
             "defaultValue": false
         }
     ],
-    "scriptsWorkOrders": [
-        {
-            "file": "CTLD.lua",
-            "mnemonic": "ctld-script"
-        }
-    ],
+    "scriptsWorkOrders": [],
     "configurationWorkOrders": [
         {
             "file": "ctld-config.lua",
