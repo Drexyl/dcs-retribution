@@ -11,8 +11,10 @@
 --   * dcsRetribution.Carriers                   carriers and LHAs, which act as pickup zones
 --   * dcsRetribution.JTACs                      front-line JTACs, lasing through AUTOLASE
 --
--- MOOSE's CTLD only serves players, so AI transports are loaded and unloaded here: AI troop transports pick up troops
--- when they land in a pickup zone or on a carrier and drop them when they land in a drop-off zone.
+-- MOOSE's CTLD only serves players, so AI transports are loaded and unloaded here: AI troop helicopters pick up troops
+-- when they land in a pickup zone or on a carrier and drop them when they land in a drop-off zone. AI fixed-wing
+-- transports start with troops on board and parachute them over their target zone, except the Anubis Hercules mod,
+-- which drops paratroopers from its own loadout (see the Hercules cargo plugin).
 -------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 -- Assumed mass of one soldier with kit, in kg.
@@ -30,6 +32,13 @@ local SHIP_WIDTH = 60
 local JTAC_LASE_DISTANCE = 10000
 -- The laser code FC3 aircraft (Su-25T, A-10A) can use.
 local FC3_LASER_CODE = 1113
+-- The Anubis Hercules mod. Retribution gives it paratroopers as bombs and a carpet-bombing task, so it drops its troops
+-- without CTLD.
+local ANUBIS_HERCULES = "Hercules"
+-- Descent rate of a paratrooper under canopy, in m/s; paratroopers reach the ground this long after jumping.
+local PARACHUTE_DESCENT_RATE = 5
+-- Distance between two paratroopers on the ground, along the aircraft's track, in metres.
+local PARATROOPER_SPACING = 15
 
 local SIDE_NAMES = { [1] = "red", [2] = "blue" }
 
@@ -64,7 +73,8 @@ local function setup()
         local instance = {
             side = side,
             pilot_groups = {},
-            -- Unit names of the transports, for the AI loop.
+            -- Transport unit name -> { paradrop_zone }, for the AI loop. paradrop_zone is the target zone a fixed-wing
+            -- transport parachutes its troops over, nil for transports that land to unload.
             pilot_units = {},
             -- Troop cargo by ascending size: { name, troops }.
             troops = {},
@@ -132,8 +142,14 @@ local function setup()
             if flight.group_name then
                 instance.pilot_groups[flight.group_name] = true
             end
+            local transport = transports[flight.aircraft_type]
+            local paradrop = transport ~= nil and not toboolean(transport.helicopter) and flight.aircraft_type ~= ANUBIS_HERCULES
+            local paradrop_zone = nil
+            if paradrop and flight.target_zone and flight.target_zone ~= "" then
+                paradrop_zone = flight.target_zone
+            end
             for _, pilot in pairs(flight.pilot_names or {}) do
-                instance.pilot_units[pilot] = true
+                instance.pilot_units[pilot] = { paradrop_zone = paradrop_zone }
                 if toboolean(flight.preload) then
                     preload_units[pilot] = instance
                 end
@@ -252,11 +268,86 @@ local function setup()
         return not unit:InAir() or not instance.ctld:IsUnitInAir(unit)
     end
 
+    --- Spawns the paratroopers of one troop template where they land, strung out along the aircraft's track.
+    local function land_paratroopers(instance, template, landing, heading, group, unit)
+        local ctld = instance.ctld
+        local template_group = _DATABASE:GetGroupTemplate(template)
+        if not template_group then
+            env.error("DCSRetribution|CTLD plugin - no troop template " .. tostring(template))
+            return
+        end
+        local count = #template_group.units
+        local positions = {}
+        for index = 1, count do
+            local offset = (index - (count + 1) / 2) * PARATROOPER_SPACING
+            local position = landing:Translate(offset, heading):GetVec2()
+            positions[index] = { x = position.x, y = position.y, heading = heading }
+        end
+        ctld.TroopCounter = ctld.TroopCounter + 1
+        local troops = SPAWN:NewWithAlias(template, string.format("%s-%d", template, math.random(1, 100000)))
+            :InitDelayOff()
+            :InitCoalition(ctld.coalition)
+            :InitSetUnitAbsolutePositions(positions)
+            :InitValidateAndRepositionGroundUnits(ctld.validateAndRepositionUnits)
+            :SpawnFromVec2(landing:GetVec2())
+        ctld.DroppedTroops[ctld.TroopCounter] = troops
+        -- Lets CTLD move the troops into the target zone, as with troops unloaded from a helicopter.
+        ctld:__TroopsDeployed(1, group, unit, troops, CTLD_CARGO.Enum.TROOPS)
+    end
+
+    --- Drops the troops of an AI fixed-wing transport by parachute. MOOSE's own air drop puts the troops on the ground
+    --- at once and only within narrow speed and height limits, which AI flights don't keep to.
+    local function paradrop(instance, unit)
+        local ctld = instance.ctld
+        local unit_name = unit:GetName()
+        local loaded = ctld.Loaded_Cargo[unit_name] or {}
+        local remaining = { Troopsloaded = 0, Cratesloaded = 0, Cargo = {} }
+        local templates = {}
+        for _, cargo in pairs(loaded.Cargo or {}) do
+            if not cargo:WasDropped() then
+                if cargo:GetType() == CTLD_CARGO.Enum.TROOPS then
+                    cargo:SetWasDropped(true)
+                    for _, template in pairs(cargo:GetTemplates() or {}) do
+                        table.insert(templates, template)
+                    end
+                else
+                    table.insert(remaining.Cargo, cargo)
+                    remaining.Cratesloaded = remaining.Cratesloaded + 1
+                end
+            end
+        end
+        ctld.Loaded_Cargo[unit_name] = remaining
+        ctld:_UpdateUnitCargoMass(unit)
+
+        local landing = unit:GetCoordinate()
+        local height = math.max(landing.y - landing:GetLandHeight(), 0)
+        local heading = unit:GetHeading() or 0
+        local group = unit:GetGroup()
+        log("AI %s parachutes %d troop group(s) from %d m", unit_name, #templates, height)
+        TIMER:New(function()
+            for _, template in ipairs(templates) do
+                local ok, err = pcall(land_paratroopers, instance, template, landing, heading, group, unit)
+                if not ok then
+                    env.error("DCSRetribution|CTLD plugin - paradrop failed: " .. tostring(err))
+                end
+            end
+        end):Start(math.max(height / PARACHUTE_DESCENT_RATE, 1))
+    end
+
     local function service_ai_transports(instance)
         local ctld = instance.ctld
-        for unit_name in pairs(instance.pilot_units) do
+        for unit_name, transport in pairs(instance.pilot_units) do
             local unit = UNIT:FindByName(unit_name)
-            if unit and unit:IsAlive() and not unit:IsPlayer() and is_landed(instance, unit) then
+            if not unit or not unit:IsAlive() or unit:IsPlayer() then
+                -- Not an AI transport in the mission (yet).
+            elseif transport.paradrop_zone then
+                if has_troops(instance, unit_name) and not is_landed(instance, unit) then
+                    local zone = ZONE:FindByName(transport.paradrop_zone)
+                    if zone and unit:IsInZone(zone) then
+                        paradrop(instance, unit)
+                    end
+                end
+            elseif is_landed(instance, unit) then
                 if not has_troops(instance, unit_name) then
                     if ctld:IsUnitInZone(unit, CTLD.CargoZoneType.LOAD) or ctld:IsUnitInZone(unit, CTLD.CargoZoneType.SHIP) then
                         local cargo = largest_troop_cargo(instance, unit)
